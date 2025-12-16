@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 /**
  * PUT /api/sessions/[id]/periods/[period]
- * Rename a period
+ * Rename a period (updates both period budget and allocations)
  */
 export async function PUT(
   request: NextRequest,
@@ -40,52 +38,80 @@ export async function PUT(
       );
     }
 
-    // Check if old period exists
-    const oldAllocations = await prisma.allocation.findMany({
+    // Check if old period budget exists
+    const oldPeriodBudget = await prisma.periodBudget.findUnique({
       where: {
-        sessionId,
-        period: actualOldPeriod,
+        sessionId_period: {
+          sessionId,
+          period: actualOldPeriod,
+        },
       },
     });
 
-    if (oldAllocations.length === 0) {
+    if (!oldPeriodBudget) {
       return NextResponse.json(
         { error: 'Period not found' },
         { status: 404 }
       );
     }
 
-    // Check if new period already exists
-    const existingAllocation = await prisma.allocation.findFirst({
+    // Check if new period name already exists
+    const existingPeriodBudget = await prisma.periodBudget.findUnique({
       where: {
-        sessionId,
-        period: newPeriod.trim(),
+        sessionId_period: {
+          sessionId,
+          period: newPeriod.trim(),
+        },
       },
     });
 
-    if (existingAllocation) {
+    if (existingPeriodBudget) {
       return NextResponse.json(
         { error: 'New period name already exists' },
         { status: 409 }
       );
     }
 
-    // Update all allocations with the new period name
-    await prisma.allocation.updateMany({
-      where: {
-        sessionId,
-        period: actualOldPeriod,
-      },
-      data: {
-        period: newPeriod.trim(),
-      },
+    // Use transaction to update both period budget and allocations
+    const result = await prisma.$transaction(async (tx) => {
+      // Delete old period budget (unique constraint)
+      await tx.periodBudget.delete({
+        where: {
+          sessionId_period: {
+            sessionId,
+            period: actualOldPeriod,
+          },
+        },
+      });
+
+      // Create new period budget with same budget value
+      await tx.periodBudget.create({
+        data: {
+          sessionId,
+          period: newPeriod.trim(),
+          budget: oldPeriodBudget.budget,
+        },
+      });
+
+      // Update all allocations with the new period name
+      const allocationsResult = await tx.allocation.updateMany({
+        where: {
+          sessionId,
+          period: actualOldPeriod,
+        },
+        data: {
+          period: newPeriod.trim(),
+        },
+      });
+
+      return { updated: allocationsResult.count };
     });
 
     return NextResponse.json({
       success: true,
       oldPeriod: actualOldPeriod,
       newPeriod: newPeriod.trim(),
-      updated: oldAllocations.length,
+      updated: result.updated,
     });
   } catch (error) {
     console.error('Error renaming period:', error);
@@ -98,7 +124,7 @@ export async function PUT(
 
 /**
  * DELETE /api/sessions/[id]/periods/[period]
- * Delete a period and all its allocations
+ * Delete a period (period budget and allocations - CASCADE)
  */
 export async function DELETE(
   request: NextRequest,
@@ -110,6 +136,14 @@ export async function DELETE(
     // Decode URL-encoded period
     const decodedPeriod = decodeURIComponent(period);
     const actualPeriod = decodedPeriod === 'null' ? null : decodedPeriod;
+
+    // Prevent deletion of default period
+    if (actualPeriod === null) {
+      return NextResponse.json(
+        { error: 'Cannot delete default period' },
+        { status: 400 }
+      );
+    }
 
     // Verify session exists
     const session = await prisma.session.findUnique({
@@ -123,20 +157,40 @@ export async function DELETE(
       );
     }
 
-    // Delete all allocations for this period
+    // Check if period budget exists
+    const periodBudget = await prisma.periodBudget.findUnique({
+      where: {
+        sessionId_period: {
+          sessionId,
+          period: actualPeriod,
+        },
+      },
+    });
+
+    if (!periodBudget) {
+      return NextResponse.json(
+        { error: 'Period not found' },
+        { status: 404 }
+      );
+    }
+
+    // Delete period budget (allocations will be CASCADE deleted)
+    await prisma.periodBudget.delete({
+      where: {
+        sessionId_period: {
+          sessionId,
+          period: actualPeriod,
+        },
+      },
+    });
+
+    // Also explicitly delete allocations to get count
     const result = await prisma.allocation.deleteMany({
       where: {
         sessionId,
         period: actualPeriod,
       },
     });
-
-    if (result.count === 0) {
-      return NextResponse.json(
-        { error: 'Period not found' },
-        { status: 404 }
-      );
-    }
 
     return NextResponse.json({
       success: true,
