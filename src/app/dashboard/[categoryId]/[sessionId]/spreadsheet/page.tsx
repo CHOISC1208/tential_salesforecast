@@ -112,6 +112,8 @@ export default function SpreadsheetPage() {
 
       if (sessionRes.ok) {
         const sessionData = await sessionRes.json()
+        console.log('Session data loaded:', sessionData)
+        console.log('Period budgets:', sessionData.periodBudgets)
         setSession(sessionData)
       }
 
@@ -1024,6 +1026,15 @@ export default function SpreadsheetPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-xl">セッションが見つかりません</div>
+      </div>
+    )
+  }
+
+  // Guard: Check if periodBudgets is loaded
+  if (!session.periodBudgets || session.periodBudgets.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-xl">期間予算データを読み込み中...</div>
       </div>
     )
   }
