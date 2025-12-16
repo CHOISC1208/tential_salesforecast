@@ -3,7 +3,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { ArrowLeft, Save, ChevronDown, ChevronRight, ChevronUp, Download, Calendar, Plus, Edit2, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, Save, ChevronDown, ChevronRight, ChevronUp, Download, Calendar, Plus, Edit2, Trash2, Upload, Loader2 } from 'lucide-react'
 import Papa from 'papaparse'
 
 interface PeriodBudget {
@@ -93,6 +93,23 @@ export default function SpreadsheetPage() {
   const [periodModalBudget, setPeriodModalBudget] = useState('')
   const [periodModalCopyFrom, setPeriodModalCopyFrom] = useState<string | null>(null)
   const [showPeriodBreakdown, setShowPeriodBreakdown] = useState(true)
+
+  // Loading states for async operations
+  const [loadingOperations, setLoadingOperations] = useState<{
+    save: boolean
+    csvExport: boolean
+    csvImport: boolean
+    periodAdd: boolean
+    periodRename: boolean
+    periodDelete: boolean
+  }>({
+    save: false,
+    csvExport: false,
+    csvImport: false,
+    periodAdd: false,
+    periodRename: false,
+    periodDelete: false
+  })
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -512,6 +529,7 @@ export default function SpreadsheetPage() {
   }
 
   const saveAllocations = async () => {
+    setLoadingOperations(prev => ({ ...prev, save: true }))
     try {
       // Convert amount from string to number for API
       const allocationsToSave = allocations.map(a => ({
@@ -536,6 +554,8 @@ export default function SpreadsheetPage() {
     } catch (error) {
       console.error('Error saving allocations:', error)
       alert('保存に失敗しました')
+    } finally {
+      setLoadingOperations(prev => ({ ...prev, save: false }))
     }
   }
 
@@ -714,6 +734,7 @@ export default function SpreadsheetPage() {
       return
     }
 
+    setLoadingOperations(prev => ({ ...prev, csvExport: true }))
     try {
       // Fetch all allocations for all periods
       const allocRes = await fetch(`/api/sessions/${params.sessionId}/allocations`)
@@ -845,6 +866,8 @@ export default function SpreadsheetPage() {
     } catch (error) {
       console.error('Error exporting CSV:', error)
       alert('CSV出力に失敗しました')
+    } finally {
+      setLoadingOperations(prev => ({ ...prev, csvExport: false }))
     }
   }
 
@@ -852,37 +875,42 @@ export default function SpreadsheetPage() {
     const file = e.target.files?.[0]
     if (!file) return
 
+    setLoadingOperations(prev => ({ ...prev, csvImport: true }))
+
     Papa.parse(file, {
       header: true,
       complete: async (results) => {
-        const data = results.data as any[]
-        if (data.length === 0) return
+        try {
+          const data = results.data as any[]
+          if (data.length === 0) {
+            setLoadingOperations(prev => ({ ...prev, csvImport: false }))
+            return
+          }
 
-        // Extract hierarchy columns (all columns except sku_code and unitprice)
-        const allColumns = Object.keys(data[0])
-        const hierarchyColumns = allColumns.filter(
-          col => col !== 'sku_code' && col !== 'unitprice'
-        )
+          // Extract hierarchy columns (all columns except sku_code and unitprice)
+          const allColumns = Object.keys(data[0])
+          const hierarchyColumns = allColumns.filter(
+            col => col !== 'sku_code' && col !== 'unitprice'
+          )
 
-        // Transform data
-        const skuData = data
-          .filter(row => row.sku_code && row.unitprice)
-          .map(row => {
-            const hierarchyValues: Record<string, string> = {}
-            hierarchyColumns.forEach(col => {
-              if (row[col]) {
-                hierarchyValues[col] = row[col]
+          // Transform data
+          const skuData = data
+            .filter(row => row.sku_code && row.unitprice)
+            .map(row => {
+              const hierarchyValues: Record<string, string> = {}
+              hierarchyColumns.forEach(col => {
+                if (row[col]) {
+                  hierarchyValues[col] = row[col]
+                }
+              })
+
+              return {
+                skuCode: row.sku_code,
+                unitPrice: parseInt(row.unitprice),
+                hierarchyValues
               }
             })
 
-            return {
-              skuCode: row.sku_code,
-              unitPrice: parseInt(row.unitprice),
-              hierarchyValues
-            }
-          })
-
-        try {
           const response = await fetch(`/api/sessions/${params.sessionId}/import`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -891,10 +919,16 @@ export default function SpreadsheetPage() {
 
           if (response.ok) {
             setShowUploadModal(false)
-            loadData()
+            await loadData()
+            alert('CSVの取り込みが完了しました')
+          } else {
+            alert('CSV取り込みに失敗しました')
           }
         } catch (error) {
           console.error('Error uploading CSV:', error)
+          alert('CSV取り込みに失敗しました')
+        } finally {
+          setLoadingOperations(prev => ({ ...prev, csvImport: false }))
         }
       }
     })
@@ -1325,20 +1359,40 @@ export default function SpreadsheetPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setShowUploadModal(true)} className="btn btn-primary flex items-center gap-2">
+              <button
+                onClick={() => setShowUploadModal(true)}
+                disabled={loadingOperations.csvImport}
+                className="btn btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 <Upload size={20} />
                 CSV取り込み
               </button>
               {skuData.length > 0 && (
-                <button onClick={exportToCSV} className="btn bg-gray-600 text-white hover:bg-gray-700 flex items-center gap-2">
-                  <Download size={20} />
-                  CSV出力
+                <button
+                  onClick={exportToCSV}
+                  disabled={loadingOperations.csvExport}
+                  className="btn bg-gray-600 text-white hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingOperations.csvExport ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Download size={20} />
+                  )}
+                  {loadingOperations.csvExport ? '出力中...' : 'CSV出力'}
                 </button>
               )}
               {session.category?.userId === authSession?.user?.id && (
-                <button onClick={saveAllocations} className="btn btn-primary flex items-center gap-2">
-                  <Save size={20} />
-                  保存
+                <button
+                  onClick={saveAllocations}
+                  disabled={loadingOperations.save}
+                  className="btn btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingOperations.save ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Save size={20} />
+                  )}
+                  {loadingOperations.save ? '保存中...' : '保存'}
                 </button>
               )}
             </div>
@@ -1786,7 +1840,16 @@ export default function SpreadsheetPage() {
       {/* CSV Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md">
+          <div className="bg-white p-6 rounded-lg w-full max-w-md relative">
+            {/* Loading overlay */}
+            {loadingOperations.csvImport && (
+              <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-lg z-10">
+                <Loader2 size={48} className="animate-spin text-blue-600 mb-4" />
+                <p className="text-lg font-medium text-gray-900">取り込み中...</p>
+                <p className="text-sm text-gray-600 mt-2">しばらくお待ちください</p>
+              </div>
+            )}
+
             <h2 className="text-xl font-bold mb-4 text-gray-900">CSV取り込み</h2>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-900 mb-2">CSVファイル</label>
@@ -1794,7 +1857,8 @@ export default function SpreadsheetPage() {
                 type="file"
                 accept=".csv"
                 onChange={handleCSVUpload}
-                className="w-full"
+                disabled={loadingOperations.csvImport}
+                className="w-full disabled:opacity-50"
               />
               <p className="text-sm text-gray-600 mt-2">
                 必須カラム: sku_code, unitprice<br />
@@ -1803,7 +1867,8 @@ export default function SpreadsheetPage() {
             </div>
             <button
               onClick={() => setShowUploadModal(false)}
-              className="btn btn-secondary w-full"
+              disabled={loadingOperations.csvImport}
+              className="btn btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
               キャンセル
             </button>
