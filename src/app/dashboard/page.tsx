@@ -16,13 +16,18 @@ interface Category {
   }
 }
 
+interface PeriodBudget {
+  period: string | null
+  budget: string
+}
+
 interface Session {
   id: string
   name: string
-  totalBudget: string
   status: string
   createdAt: string
   category: Category
+  periodBudgets: PeriodBudget[]
 }
 
 export default function DashboardPage() {
@@ -37,7 +42,7 @@ export default function DashboardPage() {
   const [newSession, setNewSession] = useState({
     categoryId: '',
     name: '',
-    totalBudget: ''
+    defaultBudget: ''
   })
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [sessionSearchQuery, setSessionSearchQuery] = useState('')
@@ -127,7 +132,7 @@ export default function DashboardPage() {
   }
 
   const createSession = async () => {
-    if (!newSession.categoryId || !newSession.name || !newSession.totalBudget) return
+    if (!newSession.categoryId || !newSession.name || !newSession.defaultBudget) return
 
     try {
       const response = await fetch('/api/sessions', {
@@ -135,12 +140,12 @@ export default function DashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newSession,
-          totalBudget: parseInt(newSession.totalBudget)
+          defaultBudget: parseInt(newSession.defaultBudget)
         })
       })
 
       if (response.ok) {
-        setNewSession({ categoryId: '', name: '', totalBudget: '' })
+        setNewSession({ categoryId: '', name: '', defaultBudget: '' })
         setShowSessionModal(false)
         loadData()
       }
@@ -270,7 +275,7 @@ export default function DashboardPage() {
                                   <div>
                                     <h4 className="font-semibold text-gray-900">{session.name}</h4>
                                     <p className="text-sm text-gray-600">
-                                      予算: ¥{parseInt(session.totalBudget).toLocaleString()}
+                                      予算: ¥{parseInt(session.periodBudgets.find(pb => pb.period === null)?.budget || '0').toLocaleString()}
                                     </p>
                                     <p className="text-xs text-gray-500 mt-1">
                                       作成者: {session.category.user?.name || session.category.user?.email || '不明'} |
@@ -380,12 +385,12 @@ export default function DashboardPage() {
               />
             </div>
             <div className="mb-4">
-              <label className="label">総予算 (円)</label>
+              <label className="label">デフォルト期間の予算 (円)</label>
               <input
                 type="number"
                 className="input"
-                value={newSession.totalBudget}
-                onChange={(e) => setNewSession({ ...newSession, totalBudget: e.target.value })}
+                value={newSession.defaultBudget}
+                onChange={(e) => setNewSession({ ...newSession, defaultBudget: e.target.value })}
                 placeholder="例: 10000000"
               />
             </div>
@@ -396,7 +401,7 @@ export default function DashboardPage() {
               <button
                 onClick={() => {
                   setShowSessionModal(false)
-                  setNewSession({ categoryId: '', name: '', totalBudget: '' })
+                  setNewSession({ categoryId: '', name: '', defaultBudget: '' })
                 }}
                 className="btn btn-secondary flex-1"
               >
