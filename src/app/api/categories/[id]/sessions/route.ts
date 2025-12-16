@@ -45,7 +45,6 @@ export async function GET(
       select: {
         id: true,
         name: true,
-        totalBudget: true,
         status: true,
         createdAt: true
       }

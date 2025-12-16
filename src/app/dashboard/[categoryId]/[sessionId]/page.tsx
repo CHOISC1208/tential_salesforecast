@@ -9,9 +9,12 @@ import Papa from 'papaparse'
 interface Session {
   id: string
   name: string
-  totalBudget: string
   status: string
   hierarchyDefinitions: HierarchyDefinition[]
+  periodBudgets: Array<{
+    period: string | null
+    budget: string
+  }>
   category?: {
     id: string
     name: string
@@ -193,7 +196,8 @@ export default function SessionPage() {
   const updateAllocation = (path: string, percentage: number) => {
     if (!session) return
 
-    const totalBudget = parseInt(session.totalBudget)
+    // Calculate total budget from all periods
+    const totalBudget = session.periodBudgets.reduce((sum, pb) => sum + parseInt(pb.budget), 0)
     const amount = Math.floor(totalBudget * (percentage / 100))
 
     // Find related SKUs
@@ -438,7 +442,7 @@ export default function SessionPage() {
                 <h1 className="text-3xl font-bold">{session.name}</h1>
                 <div className="flex items-center gap-4">
                   <p className="text-gray-600">
-                    総予算: ¥{parseInt(session.totalBudget).toLocaleString()}
+                    総予算: ¥{session.periodBudgets.reduce((sum, pb) => sum + parseInt(pb.budget), 0).toLocaleString()}
                   </p>
                   <div className="text-sm text-gray-600">
                     作成者: {session.category?.user?.name || session.category?.user?.email || '不明'}
