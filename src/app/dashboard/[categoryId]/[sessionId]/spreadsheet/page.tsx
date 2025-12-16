@@ -92,6 +92,7 @@ export default function SpreadsheetPage() {
   const [periodModalNewValue, setPeriodModalNewValue] = useState('')
   const [periodModalBudget, setPeriodModalBudget] = useState('')
   const [periodModalCopyFrom, setPeriodModalCopyFrom] = useState<string | null>(null)
+  const [showPeriodBreakdown, setShowPeriodBreakdown] = useState(true)
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -1441,23 +1442,37 @@ export default function SpreadsheetPage() {
 
                 {/* 期間別進捗 */}
                 <div className="space-y-2">
-                  <h5 className="text-xs font-semibold text-gray-700">期間別:</h5>
-                  {progress.byPeriod.map((p, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <span className="text-xs text-gray-700 w-24 truncate" title={p.period || 'デフォルト'}>
-                        {p.period || 'デフォルト'}:
-                      </span>
-                      <div className="flex-1 bg-gray-200 rounded-full h-4 overflow-hidden">
-                        <div
-                          className="bg-blue-500 h-full transition-all duration-300"
-                          style={{ width: `${Math.min(p.percentage, 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-600 w-20 text-right">
-                        {p.allocated}/{p.total} ({p.percentage.toFixed(0)}%)
-                      </span>
+                  <button
+                    onClick={() => setShowPeriodBreakdown(!showPeriodBreakdown)}
+                    className="flex items-center gap-1 text-xs font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+                  >
+                    <span>期間別:</span>
+                    {showPeriodBreakdown ? (
+                      <ChevronUp size={14} />
+                    ) : (
+                      <ChevronDown size={14} />
+                    )}
+                  </button>
+                  {showPeriodBreakdown && (
+                    <div className="space-y-2 pt-1">
+                      {progress.byPeriod.map((p, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-700 w-24 truncate" title={p.period || 'デフォルト'}>
+                            {p.period || 'デフォルト'}:
+                          </span>
+                          <div className="flex-1 bg-gray-200 rounded-full h-4 overflow-hidden">
+                            <div
+                              className="bg-blue-500 h-full transition-all duration-300"
+                              style={{ width: `${Math.min(p.percentage, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-600 w-20 text-right">
+                            {p.allocated}/{p.total} ({p.percentage.toFixed(0)}%)
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
