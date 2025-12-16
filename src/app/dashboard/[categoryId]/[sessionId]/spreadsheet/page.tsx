@@ -707,38 +707,16 @@ export default function SpreadsheetPage() {
           let cumulativePercentage = 1.0 // 100%から開始
           let hasAllocation = false
 
-          // Debug: Log first SKU for debugging
-          if (skuData.indexOf(sku) === 0 && sortedPeriods.indexOf(period) === 0) {
-            console.log('=== CSV Export Debug (First SKU) ===')
-            console.log('SKU Code:', sku.skuCode)
-            console.log('SKU Path:', skuPath)
-            console.log('Path Parts:', pathParts)
-            console.log('Hierarchy Levels:', pathParts.length - 1)
-            console.log('Period Allocations Count:', periodAllocations.length)
-          }
-
           // 各階層レベルの割合を掛け算（SKUレベルは除く、階層レベルのみ）
           const hierarchyLevels = pathParts.length - 1 // 最後はSKUなので除く
           for (let level = 1; level <= hierarchyLevels; level++) {
             const levelPath = pathParts.slice(0, level).join('/')
             const levelAllocation = periodAllocations.find((a: Allocation & { period?: string | null }) => a.hierarchyPath === levelPath)
 
-            // Debug: Log each level
-            if (skuData.indexOf(sku) === 0 && sortedPeriods.indexOf(period) === 0) {
-              console.log(`  Level ${level}: path="${levelPath}", allocation=`, levelAllocation ? `${levelAllocation.percentage}%` : 'NOT FOUND')
-            }
-
             if (levelAllocation && levelAllocation.percentage > 0) {
               cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
               hasAllocation = true
             }
-          }
-
-          // Debug: Log final result
-          if (skuData.indexOf(sku) === 0 && sortedPeriods.indexOf(period) === 0) {
-            console.log('Final Cumulative %:', cumulativePercentage * 100)
-            console.log('Has Allocation:', hasAllocation)
-            console.log('=====================================')
           }
 
           // 階層に配分がある場合のみ出力
@@ -757,6 +735,13 @@ export default function SpreadsheetPage() {
           }
         })
 
+        // Debug: Log first few SKUs
+        if (skuData.indexOf(sku) < 3) {
+          console.log(`SKU ${skuData.indexOf(sku)}: ${sku.skuCode}`)
+          console.log(`  Path: ${skuPath}`)
+          console.log(`  Period Percentages:`, periodPercentages)
+        }
+
         // 行データを作成
         const row = [
           ...hierarchyValues,
@@ -766,6 +751,12 @@ export default function SpreadsheetPage() {
           totalAmount > 0 ? totalAmount.toString() : '',
           totalQuantity > 0 ? totalQuantity.toString() : ''
         ]
+
+        // Debug: Log first few rows
+        if (skuData.indexOf(sku) < 3) {
+          console.log(`  Row data:`, row)
+          console.log('---')
+        }
 
         rows.push(row)
       })
