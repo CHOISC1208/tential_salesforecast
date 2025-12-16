@@ -930,81 +930,78 @@ export default function SpreadsheetPage() {
               {node.unitPrice !== undefined ? `¥${node.unitPrice.toLocaleString()}` : ''}
             </td>
 
-            {/* 各期間の割合（グループ化） */}
+            {/* 各期間の割合と金額（期間ごとにグループ化） */}
             {availablePeriods.map(period => {
               const periodData = node.periodData.get(period)
               const percentage = periodData?.percentage || 0
+              const amount = periodData?.amount || 0
 
               const siblingsTotal = getSiblingsTotal(node, period)
               const remaining = 100 - siblingsTotal
               const isOverLimit = siblingsTotal > 100
-
-              return (
-                <td key={`${period === null ? 'null' : period}-pct`} className="text-right py-2 px-4">
-                  <div className="flex flex-col items-end gap-1">
-                    <input
-                      type="number"
-                      value={percentage || ''}
-                      onChange={(e) => updateAllocation(node.path, period, parseFloat(e.target.value) || 0)}
-                      className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
-                        isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                      }`}
-                      min="0"
-                      max="100"
-                      step="0.01"
-                    />
-                    <div className="text-xs">
-                      {isOverLimit ? (
-                        <span className="text-red-600 font-medium">超過: {Math.abs(remaining).toFixed(1)}%</span>
-                      ) : (
-                        <span className="text-gray-500">残り: {remaining.toFixed(1)}%</span>
-                      )}
-                    </div>
-                  </div>
-                </td>
-              )
-            })}
-
-            {/* 各期間の金額（グループ化） - editable with pencil icon */}
-            {availablePeriods.map(period => {
-              const periodData = node.periodData.get(period)
-              const amount = periodData?.amount || 0
               const isEditing = editingAmount?.path === node.path && editingAmount?.period === period
 
               return (
-                <td key={`${period === null ? 'null' : period}-amt`} className="text-right py-2 px-4">
-                  {isEditing ? (
-                    <input
-                      type="number"
-                      value={amount || ''}
-                      onChange={(e) => {
-                        const newAmount = parseInt(e.target.value) || 0
-                        updateAllocationByAmount(node.path, period, newAmount)
-                      }}
-                      onBlur={() => setEditingAmount(null)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === 'Escape') {
-                          setEditingAmount(null)
-                        }
-                      }}
-                      autoFocus
-                      className="w-28 px-2 py-1 border border-blue-500 rounded text-right text-gray-900"
-                    />
-                  ) : (
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setEditingAmount({ path: node.path, period })
-                      }}
-                      className="flex items-center justify-end gap-1 cursor-pointer hover:bg-blue-50 rounded px-1 py-1 group"
-                    >
-                      <span className="text-gray-900">
-                        {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
-                      </span>
-                      <Edit2 size={12} className="text-gray-400 group-hover:text-blue-600" />
+                <Fragment key={`${period === null ? 'null' : period}`}>
+                  {/* 割合カラム */}
+                  <td className="text-right py-2 px-4">
+                    <div className="flex flex-col items-end gap-1">
+                      <input
+                        type="number"
+                        value={percentage || ''}
+                        onChange={(e) => updateAllocation(node.path, period, parseFloat(e.target.value) || 0)}
+                        className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
+                          isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                        }`}
+                        min="0"
+                        max="100"
+                        step="0.01"
+                      />
+                      <div className="text-xs">
+                        {isOverLimit ? (
+                          <span className="text-red-600 font-medium">超過: {Math.abs(remaining).toFixed(1)}%</span>
+                        ) : (
+                          <span className="text-gray-500">残り: {remaining.toFixed(1)}%</span>
+                        )}
+                      </div>
                     </div>
-                  )}
-                </td>
+                  </td>
+
+                  {/* 金額カラム - editable with pencil icon */}
+                  <td className="text-right py-2 px-4">
+                    {isEditing ? (
+                      <input
+                        type="number"
+                        value={amount || ''}
+                        onChange={(e) => {
+                          const newAmount = parseInt(e.target.value) || 0
+                          updateAllocationByAmount(node.path, period, newAmount)
+                        }}
+                        onBlur={() => setEditingAmount(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'Escape') {
+                            setEditingAmount(null)
+                          }
+                        }}
+                        autoFocus
+                        className="w-28 px-2 py-1 border border-blue-500 rounded text-right text-gray-900"
+                      />
+                    ) : (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditingAmount({ path: node.path, period })
+                        }}
+                        className="flex items-center justify-end gap-1 cursor-pointer hover:bg-blue-50 rounded px-1 py-1 group"
+                      >
+                        <span className="text-gray-900">
+                          {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
+                        </span>
+                        <Edit2 size={12} className="text-gray-400 group-hover:text-blue-600" />
+                      </div>
+                    )}
+                  </td>
+                </Fragment>
               )
             })}
           </tr>
@@ -1101,13 +1098,14 @@ export default function SpreadsheetPage() {
                         </button>
                         <button
                           onClick={() => {
-                            if (availablePeriods.length === 0) {
-                              alert('変更する期間がありません')
+                            const editablePeriods = availablePeriods.filter(p => p !== null)
+                            if (editablePeriods.length === 0) {
+                              alert('変更できる期間がありません。デフォルト期間は変更できません。')
                               return
                             }
                             setPeriodModalMode('rename')
-                            setPeriodModalValue(availablePeriods[0])
-                            setPeriodModalNewValue(availablePeriods[0] === null ? '' : availablePeriods[0] || '')
+                            setPeriodModalValue(editablePeriods[0])
+                            setPeriodModalNewValue(editablePeriods[0] || '')
                             setShowPeriodModal(true)
                           }}
                           className="p-1 text-blue-600 hover:bg-blue-50 rounded"
@@ -1117,12 +1115,13 @@ export default function SpreadsheetPage() {
                         </button>
                         <button
                           onClick={() => {
-                            if (availablePeriods.length === 0) {
-                              alert('削除する期間がありません')
+                            const deletablePeriods = availablePeriods.filter(p => p !== null)
+                            if (deletablePeriods.length === 0) {
+                              alert('削除できる期間がありません。デフォルト期間は削除できません。')
                               return
                             }
                             setPeriodModalMode('delete')
-                            setPeriodModalValue(availablePeriods[0])
+                            setPeriodModalValue(deletablePeriods[0])
                             setShowPeriodModal(true)
                           }}
                           className="p-1 text-red-600 hover:bg-red-50 rounded"
@@ -1473,9 +1472,9 @@ export default function SpreadsheetPage() {
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                   >
-                    {availablePeriods.map(period => (
-                      <option key={period === null ? 'null' : period} value={period === null ? 'null' : period}>
-                        {period === null ? 'デフォルト' : period}
+                    {availablePeriods.filter(p => p !== null).map(period => (
+                      <option key={period} value={period}>
+                        {period}
                       </option>
                     ))}
                   </select>
@@ -1502,15 +1501,15 @@ export default function SpreadsheetPage() {
                     onChange={(e) => setPeriodModalValue(e.target.value === 'null' ? null : e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                   >
-                    {availablePeriods.map(period => (
-                      <option key={period === null ? 'null' : period} value={period === null ? 'null' : period}>
-                        {period === null ? 'デフォルト' : period}
+                    {availablePeriods.filter(p => p !== null).map(period => (
+                      <option key={period} value={period}>
+                        {period}
                       </option>
                     ))}
                   </select>
                 </div>
                 <p className="text-gray-900 mb-4">
-                  期間「{periodModalValue === null ? 'デフォルト' : periodModalValue}」を削除しますか？
+                  期間「{periodModalValue}」を削除しますか？
                   この期間の全ての配分データが削除されます。この操作は元に戻せません。
                 </p>
               </>
