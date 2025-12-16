@@ -157,6 +157,8 @@ export default function SpreadsheetPage() {
   const buildHierarchyTree = (): HierarchyNode[] => {
     if (!session || skuData.length === 0) return []
 
+    console.log('buildHierarchyTree called, allocations count:', allocations.length)
+
     const tree: HierarchyNode[] = []
     const nodeMap = new Map<string, HierarchyNode>()
 
@@ -180,6 +182,10 @@ export default function SpreadsheetPage() {
               amount: parseInt(alloc.amount),
               quantity: alloc.quantity
             })
+          }
+
+          if (nodeAllocations.length > 0) {
+            console.log('Node allocations for path:', path, Array.from(periodData.entries()))
           }
 
           const node: HierarchyNode = {
@@ -337,6 +343,14 @@ export default function SpreadsheetPage() {
     const parentAmount = getParentAmount(path, period, allocations)
     const amount = Math.floor(parentAmount * (percentage / 100))
 
+    console.log('updateAllocation called:', {
+      path,
+      period,
+      percentage,
+      parentAmount,
+      calculatedAmount: amount
+    })
+
     const pathLevel = path.split('/').length
     let relatedSkus: SkuData[] = []
 
@@ -375,6 +389,7 @@ export default function SpreadsheetPage() {
       }]
     }
 
+    console.log('Updated allocations:', updated.filter(a => a.hierarchyPath === path))
     setAllocations(updated)
   }
 
