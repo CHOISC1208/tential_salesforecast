@@ -874,6 +874,68 @@ export default function SpreadsheetPage() {
     }, 0)
   }
 
+  const getSiblingsTotalAmount = (node: HierarchyNode, period: string | null): number => {
+    const pathParts = node.path.split('/')
+    if (pathParts.length === 1) {
+      // Level 1: sum all level 1 nodes
+      return hierarchyTree.reduce((sum, n) => {
+        const periodData = n.periodData.get(period)
+        return sum + (periodData?.amount || 0)
+      }, 0)
+    }
+
+    // Find siblings by looking for nodes with same parent
+    const parentPath = pathParts.slice(0, -1).join('/')
+    const findSiblings = (nodes: HierarchyNode[]): HierarchyNode[] => {
+      for (const n of nodes) {
+        if (n.path === parentPath) {
+          return n.children
+        }
+        if (n.children.length > 0) {
+          const found = findSiblings(n.children)
+          if (found.length > 0) return found
+        }
+      }
+      return []
+    }
+
+    const siblings = findSiblings(hierarchyTree)
+    return siblings.reduce((sum, n) => {
+      const periodData = n.periodData.get(period)
+      return sum + (periodData?.amount || 0)
+    }, 0)
+  }
+
+  const getParentAmount = (node: HierarchyNode, period: string | null): number => {
+    const pathParts = node.path.split('/')
+    if (pathParts.length === 1) {
+      // Level 1: use period budget as parent amount
+      const periodBudget = periodBudgets.find(pb => pb.period === period)
+      return periodBudget ? parseInt(periodBudget.budget) : 0
+    }
+
+    // Find parent node
+    const parentPath = pathParts.slice(0, -1).join('/')
+    const findParent = (nodes: HierarchyNode[]): HierarchyNode | null => {
+      for (const n of nodes) {
+        if (n.path === parentPath) {
+          return n
+        }
+        if (n.children.length > 0) {
+          const found = findParent(n.children)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const parent = findParent(hierarchyTree)
+    if (!parent) return 0
+
+    const parentPeriodData = parent.periodData.get(period)
+    return parentPeriodData?.amount || 0
+  }
+
   // Helper function to get parent path
   const getParentPath = (path: string): string | null => {
     const pathParts = path.split('/')
@@ -956,6 +1018,12 @@ export default function SpreadsheetPage() {
               const isOverLimit = siblingsTotal > 100
               const isEditing = editingAmount?.path === node.path && editingAmount?.period === period
 
+              // Amount calculations
+              const parentAmount = getParentAmount(node, period)
+              const siblingsTotalAmount = getSiblingsTotalAmount(node, period)
+              const remainingAmount = parentAmount - siblingsTotalAmount
+              const isAmountOverLimit = siblingsTotalAmount > parentAmount
+
               return (
                 <Fragment key={`${period === null ? 'null' : period}`}>
                   {/* 割合カラム */}
@@ -984,37 +1052,46 @@ export default function SpreadsheetPage() {
 
                   {/* 金額カラム - editable with pencil icon */}
                   <td className="text-right py-2 px-4">
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        value={amount || ''}
-                        onChange={(e) => {
-                          const newAmount = parseInt(e.target.value) || 0
-                          updateAllocationByAmount(node.path, period, newAmount)
-                        }}
-                        onBlur={() => setEditingAmount(null)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === 'Escape') {
-                            setEditingAmount(null)
-                          }
-                        }}
-                        autoFocus
-                        className="w-28 px-2 py-1 border border-blue-500 rounded text-right text-gray-900"
-                      />
-                    ) : (
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setEditingAmount({ path: node.path, period })
-                        }}
-                        className="flex items-center justify-end gap-1 cursor-pointer hover:bg-blue-50 rounded px-1 py-1 group"
-                      >
-                        <span className="text-gray-900">
-                          {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
-                        </span>
-                        <Edit2 size={12} className="text-gray-400 group-hover:text-blue-600" />
+                    <div className="flex flex-col items-end gap-1">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          value={amount || ''}
+                          onChange={(e) => {
+                            const newAmount = parseInt(e.target.value) || 0
+                            updateAllocationByAmount(node.path, period, newAmount)
+                          }}
+                          onBlur={() => setEditingAmount(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === 'Escape') {
+                              setEditingAmount(null)
+                            }
+                          }}
+                          autoFocus
+                          className="w-28 px-2 py-1 border border-blue-500 rounded text-right text-gray-900"
+                        />
+                      ) : (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingAmount({ path: node.path, period })
+                          }}
+                          className="flex items-center justify-end gap-1 cursor-pointer hover:bg-blue-50 rounded px-1 py-1 group"
+                        >
+                          <span className="text-gray-900">
+                            {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
+                          </span>
+                          <Edit2 size={12} className="text-gray-400 group-hover:text-blue-600" />
+                        </div>
+                      )}
+                      <div className="text-xs">
+                        {isAmountOverLimit ? (
+                          <span className="text-red-600 font-medium">超過: ¥{Math.abs(remainingAmount).toLocaleString()}</span>
+                        ) : (
+                          <span className="text-gray-500">残り: ¥{remainingAmount.toLocaleString()}</span>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </td>
                 </Fragment>
               )

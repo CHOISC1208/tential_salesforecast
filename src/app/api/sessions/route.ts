@@ -6,9 +6,7 @@ import { z } from 'zod'
 
 const sessionSchema = z.object({
   categoryId: z.string().uuid(),
-  name: z.string().min(1).max(200),
-  firstPeriodName: z.string().min(1).max(100),
-  budget: z.number().int().positive()
+  name: z.string().min(1).max(200)
 })
 
 export async function GET(request: NextRequest) {
@@ -83,7 +81,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { categoryId, name, firstPeriodName, budget } = sessionSchema.parse(body)
+    const { categoryId, name } = sessionSchema.parse(body)
 
     // Verify category exists
     const category = await prisma.category.findUnique({
@@ -97,18 +95,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create session with first period budget
+    // Create session without periods (user will add periods later)
     const newSession = await prisma.session.create({
       data: {
         categoryId,
         name,
-        status: 'draft',
-        periodBudgets: {
-          create: {
-            period: firstPeriodName.trim(),
-            budget: BigInt(budget)
-          }
-        }
+        status: 'draft'
       },
       include: {
         category: true,

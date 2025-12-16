@@ -41,9 +41,7 @@ export default function DashboardPage() {
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newSession, setNewSession] = useState({
     categoryId: '',
-    name: '',
-    firstPeriodName: '',
-    budget: ''
+    name: ''
   })
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [sessionSearchQuery, setSessionSearchQuery] = useState('')
@@ -133,7 +131,7 @@ export default function DashboardPage() {
   }
 
   const createSession = async () => {
-    if (!newSession.categoryId || !newSession.name || !newSession.firstPeriodName || !newSession.budget) return
+    if (!newSession.categoryId || !newSession.name) return
 
     try {
       const response = await fetch('/api/sessions', {
@@ -141,14 +139,12 @@ export default function DashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           categoryId: newSession.categoryId,
-          name: newSession.name,
-          firstPeriodName: newSession.firstPeriodName.trim(),
-          budget: parseInt(newSession.budget)
+          name: newSession.name
         })
       })
 
       if (response.ok) {
-        setNewSession({ categoryId: '', name: '', firstPeriodName: '', budget: '' })
+        setNewSession({ categoryId: '', name: '' })
         setShowSessionModal(false)
         loadData()
       }
@@ -390,26 +386,9 @@ export default function DashboardPage() {
                 placeholder="例: 2025年春夏予算"
               />
             </div>
-            <div className="mb-4">
-              <label className="label">最初の期間名</label>
-              <input
-                type="text"
-                className="input"
-                value={newSession.firstPeriodName}
-                onChange={(e) => setNewSession({ ...newSession, firstPeriodName: e.target.value })}
-                placeholder="例: 2025-01, Q1, 春"
-              />
-            </div>
-            <div className="mb-4">
-              <label className="label">予算 (円)</label>
-              <input
-                type="number"
-                className="input"
-                value={newSession.budget}
-                onChange={(e) => setNewSession({ ...newSession, budget: e.target.value })}
-                placeholder="例: 10000000"
-              />
-            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              セッション作成後、期間管理から期間と予算を追加してください
+            </p>
             <div className="flex gap-2">
               <button onClick={createSession} className="btn btn-primary flex-1">
                 作成
@@ -417,7 +396,7 @@ export default function DashboardPage() {
               <button
                 onClick={() => {
                   setShowSessionModal(false)
-                  setNewSession({ categoryId: '', name: '', firstPeriodName: '', budget: '' })
+                  setNewSession({ categoryId: '', name: '' })
                 }}
                 className="btn btn-secondary flex-1"
               >
