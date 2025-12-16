@@ -275,7 +275,10 @@ export default function DashboardPage() {
                                   <div>
                                     <h4 className="font-semibold text-gray-900">{session.name}</h4>
                                     <p className="text-sm text-gray-600">
-                                      予算: ¥{parseInt(session.periodBudgets.find(pb => pb.period === null)?.budget || '0').toLocaleString()}
+                                      予算: ¥{(() => {
+                                        const defaultBudget = session.periodBudgets?.find(pb => pb.period === null)
+                                        return parseInt(defaultBudget?.budget || '0').toLocaleString()
+                                      })()}
                                     </p>
                                     <p className="text-xs text-gray-500 mt-1">
                                       作成者: {session.category.user?.name || session.category.user?.email || '不明'} |
