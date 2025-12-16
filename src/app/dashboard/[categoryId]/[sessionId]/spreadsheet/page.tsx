@@ -3,7 +3,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { ArrowLeft, Save, ChevronDown, ChevronRight, ChevronUp, Download, Calendar, Plus, Edit2, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, Save, ChevronDown, ChevronRight, ChevronUp, Download, Calendar, Plus, Edit2, Trash2, Upload, Loader2 } from 'lucide-react'
 import Papa from 'papaparse'
 
 interface PeriodBudget {
@@ -77,6 +77,7 @@ export default function SpreadsheetPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [focusedPath, setFocusedPath] = useState<string | null>(null)
+  const [focusedInput, setFocusedInput] = useState<{ path: string; period: string | null } | null>(null)
   const [editingAmount, setEditingAmount] = useState<{ path: string; period: string | null } | null>(null)
   const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false)
   const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
@@ -91,6 +92,24 @@ export default function SpreadsheetPage() {
   const [periodModalNewValue, setPeriodModalNewValue] = useState('')
   const [periodModalBudget, setPeriodModalBudget] = useState('')
   const [periodModalCopyFrom, setPeriodModalCopyFrom] = useState<string | null>(null)
+  const [showPeriodBreakdown, setShowPeriodBreakdown] = useState(true)
+
+  // Loading states for async operations
+  const [loadingOperations, setLoadingOperations] = useState<{
+    save: boolean
+    csvExport: boolean
+    csvImport: boolean
+    periodAdd: boolean
+    periodRename: boolean
+    periodDelete: boolean
+  }>({
+    save: false,
+    csvExport: false,
+    csvImport: false,
+    periodAdd: false,
+    periodRename: false,
+    periodDelete: false
+  })
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -315,6 +334,67 @@ export default function SpreadsheetPage() {
     setExpandedGroups(new Set())
   }
 
+  // 進捗計算：全SKU×期間のうち、配分済みの割合を計算
+  const calculateProgress = () => {
+    if (!session || skuData.length === 0 || availablePeriods.length === 0) {
+      return { allocated: 0, total: 0, percentage: 0, byPeriod: [] }
+    }
+
+    const totalSlots = skuData.length * availablePeriods.length
+    let allocatedSlots = 0
+    const byPeriod: { period: string | null; allocated: number; total: number; percentage: number }[] = []
+
+    availablePeriods.forEach(period => {
+      const periodAllocations = allocations.filter((a: Allocation & { period?: string | null }) => a.period === period)
+      let periodAllocatedCount = 0
+
+      skuData.forEach(sku => {
+        // SKUまでのパスを構築
+        const parentPath = buildHierarchyPath(sku, session.hierarchyDefinitions, session.hierarchyDefinitions.length)
+        const skuPath = parentPath ? `${parentPath}/${sku.skuCode}` : sku.skuCode
+        const pathParts = skuPath.split('/')
+
+        // 累積割合を計算（CSV exportと同じロジック）
+        let cumulativePercentage = 1.0
+        let hasAllocation = false
+        const hierarchyLevels = pathParts.length - 1
+
+        for (let level = 1; level <= hierarchyLevels; level++) {
+          const levelPath = pathParts.slice(0, level).join('/')
+          const levelAllocation = periodAllocations.find((a: Allocation & { period?: string | null }) => a.hierarchyPath === levelPath)
+
+          if (levelAllocation) {
+            hasAllocation = true
+            cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
+            if (levelAllocation.percentage === 0) break
+          }
+        }
+
+        // 配分がある場合にカウント
+        if (hasAllocation && cumulativePercentage > 0) {
+          allocatedSlots++
+          periodAllocatedCount++
+        }
+      })
+
+      byPeriod.push({
+        period,
+        allocated: periodAllocatedCount,
+        total: skuData.length,
+        percentage: skuData.length > 0 ? (periodAllocatedCount / skuData.length) * 100 : 0
+      })
+    })
+
+    return {
+      allocated: allocatedSlots,
+      total: totalSlots,
+      percentage: totalSlots > 0 ? (allocatedSlots / totalSlots) * 100 : 0,
+      byPeriod
+    }
+  }
+
+  const progress = calculateProgress()
+
   const getParentAmount = (path: string, period: string | null, allocs = allocations): number => {
     if (!session) return 0
 
@@ -449,6 +529,7 @@ export default function SpreadsheetPage() {
   }
 
   const saveAllocations = async () => {
+    setLoadingOperations(prev => ({ ...prev, save: true }))
     try {
       // Convert amount from string to number for API
       const allocationsToSave = allocations.map(a => ({
@@ -473,6 +554,8 @@ export default function SpreadsheetPage() {
     } catch (error) {
       console.error('Error saving allocations:', error)
       alert('保存に失敗しました')
+    } finally {
+      setLoadingOperations(prev => ({ ...prev, save: false }))
     }
   }
 
@@ -548,12 +631,14 @@ export default function SpreadsheetPage() {
       })
 
       if (response.ok) {
-        alert('期間を追加しました')
+        // Close modal first
         setShowPeriodModal(false)
         setPeriodModalValue('')
         setPeriodModalBudget('')
         setPeriodModalCopyFrom(null)
-        loadData()
+        // Reload data and wait for completion
+        await loadData()
+        alert('期間を追加しました')
       } else {
         const error = await response.json()
         alert(`期間の追加に失敗しました: ${error.error}`)
@@ -570,20 +655,31 @@ export default function SpreadsheetPage() {
       return
     }
 
+    if (!periodModalBudget || parseInt(periodModalBudget) <= 0) {
+      alert('予算額を入力してください')
+      return
+    }
+
     try {
       const encodedPeriod = encodeURIComponent(periodModalValue === null ? 'null' : periodModalValue)
       const response = await fetch(`/api/sessions/${params.sessionId}/periods/${encodedPeriod}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPeriod: periodModalNewValue.trim() })
+        body: JSON.stringify({
+          newPeriod: periodModalNewValue.trim(),
+          budget: parseInt(periodModalBudget)
+        })
       })
 
       if (response.ok) {
-        alert('期間名を変更しました')
+        // Close modal first
         setShowPeriodModal(false)
         setPeriodModalValue('')
         setPeriodModalNewValue('')
-        loadData()
+        setPeriodModalBudget('')
+        // Reload data and wait for completion
+        await loadData()
+        alert('期間名と予算を変更しました')
       } else {
         const error = await response.json()
         alert(`期間名の変更に失敗しました: ${error.error}`)
@@ -606,10 +702,12 @@ export default function SpreadsheetPage() {
       })
 
       if (response.ok) {
-        alert('期間を削除しました')
+        // Close modal first
         setShowPeriodModal(false)
         setPeriodModalValue('')
-        loadData()
+        // Reload data and wait for completion
+        await loadData()
+        alert('期間を削除しました')
       } else {
         const error = await response.json()
         alert(`期間の削除に失敗しました: ${error.error}`)
@@ -636,6 +734,7 @@ export default function SpreadsheetPage() {
       return
     }
 
+    setLoadingOperations(prev => ({ ...prev, csvExport: true }))
     try {
       // Fetch all allocations for all periods
       const allocRes = await fetch(`/api/sessions/${params.sessionId}/allocations`)
@@ -686,27 +785,32 @@ export default function SpreadsheetPage() {
             a.period === period
           )
 
-          // SKUまでのパスの各階層の割合を取得
+          // SKUまでのパスの各階層の割合を取得（SKU自体は除く）
           const pathParts = skuPath.split('/')
           let cumulativePercentage = 1.0 // 100%から開始
           let hasAllocation = false
 
-          // 各階層レベルの割合を掛け算
-          for (let level = 1; level <= pathParts.length; level++) {
+          // 各階層レベルの割合を掛け算（SKUレベルは除く、階層レベルのみ）
+          const hierarchyLevels = pathParts.length - 1 // 最後はSKUなので除く
+          for (let level = 1; level <= hierarchyLevels; level++) {
             const levelPath = pathParts.slice(0, level).join('/')
             const levelAllocation = periodAllocations.find((a: Allocation & { period?: string | null }) => a.hierarchyPath === levelPath)
 
-            if (levelAllocation && levelAllocation.percentage > 0) {
-              cumulativePercentage *= (levelAllocation.percentage / 100)
+            if (levelAllocation) {
+              // 配分レコードが存在する場合は、その割合を掛ける（0%でも）
               hasAllocation = true
-            } else if (level === pathParts.length && !hasAllocation) {
-              // SKUレベルで配分がない場合
-              cumulativePercentage = 0
-              break
+              cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
+
+              // 0%の場合は早期終了（これより下の階層を見ても結果は0%のまま）
+              if (levelAllocation.percentage === 0) {
+                break
+              }
             }
+            // NOT FOUNDの場合は100%パススルー（掛け算しない = 1.0を掛けるのと同じ）
           }
 
-          if (cumulativePercentage > 0 && hasAllocation) {
+          // 階層に配分がある場合のみ出力
+          if (hasAllocation) {
             const finalPercentage = cumulativePercentage * 100
             periodPercentages.push(finalPercentage.toFixed(4))
 
@@ -762,6 +866,8 @@ export default function SpreadsheetPage() {
     } catch (error) {
       console.error('Error exporting CSV:', error)
       alert('CSV出力に失敗しました')
+    } finally {
+      setLoadingOperations(prev => ({ ...prev, csvExport: false }))
     }
   }
 
@@ -769,37 +875,42 @@ export default function SpreadsheetPage() {
     const file = e.target.files?.[0]
     if (!file) return
 
+    setLoadingOperations(prev => ({ ...prev, csvImport: true }))
+
     Papa.parse(file, {
       header: true,
       complete: async (results) => {
-        const data = results.data as any[]
-        if (data.length === 0) return
+        try {
+          const data = results.data as any[]
+          if (data.length === 0) {
+            setLoadingOperations(prev => ({ ...prev, csvImport: false }))
+            return
+          }
 
-        // Extract hierarchy columns (all columns except sku_code and unitprice)
-        const allColumns = Object.keys(data[0])
-        const hierarchyColumns = allColumns.filter(
-          col => col !== 'sku_code' && col !== 'unitprice'
-        )
+          // Extract hierarchy columns (all columns except sku_code and unitprice)
+          const allColumns = Object.keys(data[0])
+          const hierarchyColumns = allColumns.filter(
+            col => col !== 'sku_code' && col !== 'unitprice'
+          )
 
-        // Transform data
-        const skuData = data
-          .filter(row => row.sku_code && row.unitprice)
-          .map(row => {
-            const hierarchyValues: Record<string, string> = {}
-            hierarchyColumns.forEach(col => {
-              if (row[col]) {
-                hierarchyValues[col] = row[col]
+          // Transform data
+          const skuData = data
+            .filter(row => row.sku_code && row.unitprice)
+            .map(row => {
+              const hierarchyValues: Record<string, string> = {}
+              hierarchyColumns.forEach(col => {
+                if (row[col]) {
+                  hierarchyValues[col] = row[col]
+                }
+              })
+
+              return {
+                skuCode: row.sku_code,
+                unitPrice: parseInt(row.unitprice),
+                hierarchyValues
               }
             })
 
-            return {
-              skuCode: row.sku_code,
-              unitPrice: parseInt(row.unitprice),
-              hierarchyValues
-            }
-          })
-
-        try {
           const response = await fetch(`/api/sessions/${params.sessionId}/import`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -808,10 +919,16 @@ export default function SpreadsheetPage() {
 
           if (response.ok) {
             setShowUploadModal(false)
-            loadData()
+            await loadData()
+            alert('CSVの取り込みが完了しました')
+          } else {
+            alert('CSV取り込みに失敗しました')
           }
         } catch (error) {
           console.error('Error uploading CSV:', error)
+          alert('CSV取り込みに失敗しました')
+        } finally {
+          setLoadingOperations(prev => ({ ...prev, csvImport: false }))
         }
       }
     })
@@ -994,6 +1111,11 @@ export default function SpreadsheetPage() {
               const remainingAmount = parentAmount - siblingsTotalAmount
               const isAmountOverLimit = siblingsTotalAmount > parentAmount
 
+              // Check if this input is focused
+              const isInputFocused = focusedInput?.path === node.path && focusedInput?.period === period
+              // Check if this node is a sibling of the focused input
+              const isSiblingOfFocused = focusedInput && focusedInput.period === period && areSiblings(node.path, focusedInput.path)
+
               return (
                 <Fragment key={`${period === null ? 'null' : period}`}>
                   {/* 割合カラム */}
@@ -1003,6 +1125,8 @@ export default function SpreadsheetPage() {
                         type="number"
                         value={percentage || ''}
                         onChange={(e) => updateAllocation(node.path, period, parseFloat(e.target.value) || 0)}
+                        onFocus={() => setFocusedInput({ path: node.path, period })}
+                        onBlur={() => setFocusedInput(null)}
                         className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
                           isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
                         }`}
@@ -1012,9 +1136,13 @@ export default function SpreadsheetPage() {
                       />
                       <div className="text-xs">
                         {isOverLimit ? (
-                          <span className="text-red-600 font-medium">超過: {Math.abs(remaining).toFixed(1)}%</span>
+                          <span className={`text-red-600 ${isSiblingOfFocused ? 'font-bold text-base' : 'font-medium'}`}>
+                            超過: {Math.abs(remaining).toFixed(1)}%
+                          </span>
                         ) : (
-                          <span className="text-gray-500">残り: {remaining.toFixed(1)}%</span>
+                          <span className={`${isSiblingOfFocused ? 'text-blue-700 font-bold text-base' : 'text-gray-500'}`}>
+                            残り: {remaining.toFixed(1)}%
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1231,20 +1359,41 @@ export default function SpreadsheetPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setShowUploadModal(true)} className="btn btn-primary flex items-center gap-2">
+              <button
+                onClick={() => setShowUploadModal(true)}
+                disabled={loadingOperations.csvImport || skuData.length > 0}
+                className="btn btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={skuData.length > 0 ? 'SKUデータは既に取り込まれています' : 'CSVファイルからSKUデータを取り込む'}
+              >
                 <Upload size={20} />
-                CSV取り込み
+                {skuData.length > 0 ? 'CSV取り込み済み' : 'CSV取り込み'}
               </button>
               {skuData.length > 0 && (
-                <button onClick={exportToCSV} className="btn bg-gray-600 text-white hover:bg-gray-700 flex items-center gap-2">
-                  <Download size={20} />
-                  CSV出力
+                <button
+                  onClick={exportToCSV}
+                  disabled={loadingOperations.csvExport}
+                  className="btn bg-gray-600 text-white hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingOperations.csvExport ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Download size={20} />
+                  )}
+                  {loadingOperations.csvExport ? '出力中...' : 'CSV出力'}
                 </button>
               )}
               {session.category?.userId === authSession?.user?.id && (
-                <button onClick={saveAllocations} className="btn btn-primary flex items-center gap-2">
-                  <Save size={20} />
-                  保存
+                <button
+                  onClick={saveAllocations}
+                  disabled={loadingOperations.save}
+                  className="btn btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingOperations.save ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Save size={20} />
+                  )}
+                  {loadingOperations.save ? '保存中...' : '保存'}
                 </button>
               )}
             </div>
@@ -1321,6 +1470,67 @@ export default function SpreadsheetPage() {
                 </button>
               </div>
             </div>
+
+            {/* 進捗表示 */}
+            {availablePeriods.length > 0 && skuData.length > 0 && (
+              <div className="mt-6 border-t pt-4">
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold text-gray-900">配分進捗</h4>
+                    <span className="text-sm font-medium text-gray-900">
+                      {progress.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+                  {/* 全体プログレスバー */}
+                  <div className="w-full bg-gray-200 rounded-full h-6 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-blue-500 to-blue-600 h-full flex items-center justify-center text-white text-xs font-medium transition-all duration-300"
+                      style={{ width: `${Math.min(progress.percentage, 100)}%` }}
+                    >
+                      {progress.percentage > 5 && `${progress.allocated} / ${progress.total}`}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">
+                    全{progress.total}スロット（{skuData.length} SKUs × {availablePeriods.length} 期間）のうち {progress.allocated} スロット配分済み
+                  </p>
+                </div>
+
+                {/* 期間別進捗 */}
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowPeriodBreakdown(!showPeriodBreakdown)}
+                    className="flex items-center gap-1 text-xs font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+                  >
+                    <span>期間別:</span>
+                    {showPeriodBreakdown ? (
+                      <ChevronUp size={14} />
+                    ) : (
+                      <ChevronDown size={14} />
+                    )}
+                  </button>
+                  {showPeriodBreakdown && (
+                    <div className="space-y-2 pt-1">
+                      {progress.byPeriod.map((p, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-700 w-24 truncate" title={p.period || 'デフォルト'}>
+                            {p.period || 'デフォルト'}:
+                          </span>
+                          <div className="flex-1 bg-gray-200 rounded-full h-4 overflow-hidden">
+                            <div
+                              className="bg-blue-500 h-full transition-all duration-300"
+                              style={{ width: `${Math.min(p.percentage, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-600 w-20 text-right">
+                            {p.allocated}/{p.total} ({p.percentage.toFixed(0)}%)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* No periods message */}
@@ -1337,17 +1547,17 @@ export default function SpreadsheetPage() {
 
           {/* Table */}
           <div className="card overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{ tableLayout: 'fixed' }}>
               <thead className="bg-gray-50 sticky top-0 z-20">
                 {/* First header row: Period names with budgets */}
                 <tr>
-                  <th rowSpan={2} className="text-left py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-30 border-r border-gray-300">
+                  <th rowSpan={2} className="text-left py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-30 border-r border-gray-300" style={{ width: '400px', minWidth: '400px' }}>
                     階層名
                   </th>
-                  <th rowSpan={2} className="text-center py-3 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                  <th rowSpan={2} className="text-center py-3 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '80px', minWidth: '80px' }}>
                     レベル
                   </th>
-                  <th rowSpan={2} className="text-right py-3 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                  <th rowSpan={2} className="text-right py-3 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '120px', minWidth: '120px' }}>
                     単価
                   </th>
                   {/* Period headers with budgets in M-units */}
@@ -1367,10 +1577,10 @@ export default function SpreadsheetPage() {
                 <tr>
                   {availablePeriods.map(period => (
                     <Fragment key={`${period === null ? 'null' : period}-subheader`}>
-                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '120px', minWidth: '120px' }}>
                         %
                       </th>
-                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '180px', minWidth: '180px' }}>
                         金額
                       </th>
                     </Fragment>
@@ -1537,6 +1747,11 @@ export default function SpreadsheetPage() {
                       const val = e.target.value === 'null' ? null : e.target.value
                       setPeriodModalValue(val)
                       setPeriodModalNewValue(val === null ? '' : val)
+                      // Load current budget for selected period
+                      const periodBudget = session?.periodBudgets.find(pb => pb.period === val)
+                      if (periodBudget) {
+                        setPeriodModalBudget(periodBudget.budget)
+                      }
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                   >
@@ -1555,6 +1770,16 @@ export default function SpreadsheetPage() {
                     onChange={(e) => setPeriodModalNewValue(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="新しい期間名"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">予算額</label>
+                  <input
+                    type="number"
+                    value={periodModalBudget}
+                    onChange={(e) => setPeriodModalBudget(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="100000000"
                   />
                 </div>
               </>
@@ -1616,7 +1841,16 @@ export default function SpreadsheetPage() {
       {/* CSV Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md">
+          <div className="bg-white p-6 rounded-lg w-full max-w-md relative">
+            {/* Loading overlay */}
+            {loadingOperations.csvImport && (
+              <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-lg z-10">
+                <Loader2 size={48} className="animate-spin text-blue-600 mb-4" />
+                <p className="text-lg font-medium text-gray-900">取り込み中...</p>
+                <p className="text-sm text-gray-600 mt-2">しばらくお待ちください</p>
+              </div>
+            )}
+
             <h2 className="text-xl font-bold mb-4 text-gray-900">CSV取り込み</h2>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-900 mb-2">CSVファイル</label>
@@ -1624,7 +1858,8 @@ export default function SpreadsheetPage() {
                 type="file"
                 accept=".csv"
                 onChange={handleCSVUpload}
-                className="w-full"
+                disabled={loadingOperations.csvImport}
+                className="w-full disabled:opacity-50"
               />
               <p className="text-sm text-gray-600 mt-2">
                 必須カラム: sku_code, unitprice<br />
@@ -1633,7 +1868,8 @@ export default function SpreadsheetPage() {
             </div>
             <button
               onClick={() => setShowUploadModal(false)}
-              className="btn btn-secondary w-full"
+              disabled={loadingOperations.csvImport}
+              className="btn btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
               キャンセル
             </button>
