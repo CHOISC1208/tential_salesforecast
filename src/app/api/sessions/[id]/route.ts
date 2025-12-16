@@ -6,7 +6,6 @@ import { z } from 'zod'
 
 const updateSessionSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  totalBudget: z.number().int().positive().optional(),
   status: z.enum(['draft', 'confirmed', 'archived']).optional()
 })
 
@@ -37,6 +36,9 @@ export async function GET(
         },
         hierarchyDefinitions: {
           orderBy: { level: 'asc' }
+        },
+        periodBudgets: {
+          orderBy: { period: 'asc' }
         }
       }
     })
@@ -58,7 +60,10 @@ export async function GET(
 
     return NextResponse.json({
       ...budgetSession,
-      totalBudget: budgetSession.totalBudget.toString()
+      periodBudgets: budgetSession.periodBudgets.map(pb => ({
+        ...pb,
+        budget: pb.budget.toString()
+      }))
     })
   } catch (error) {
     console.error('Error fetching session:', error)
@@ -113,16 +118,21 @@ export async function PUT(
     const updateData: any = {}
     if (data.name) updateData.name = data.name
     if (data.status) updateData.status = data.status
-    if (data.totalBudget) updateData.totalBudget = BigInt(data.totalBudget)
 
     const updatedSession = await prisma.session.update({
       where: { id },
-      data: updateData
+      data: updateData,
+      include: {
+        periodBudgets: true
+      }
     })
 
     return NextResponse.json({
       ...updatedSession,
-      totalBudget: updatedSession.totalBudget.toString()
+      periodBudgets: updatedSession.periodBudgets.map(pb => ({
+        ...pb,
+        budget: pb.budget.toString()
+      }))
     })
   } catch (error) {
     if (error instanceof z.ZodError) {

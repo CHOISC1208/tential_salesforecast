@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
+import { z } from 'zod';
 
-const prisma = new PrismaClient();
+const periodSchema = z.object({
+  period: z.string().min(1).max(100),
+  budget: z.number().int().positive(),
+  copyFrom: z.string().optional()
+});
 
 /**
  * GET /api/sessions/[id]/periods
- * Get list of all periods used in a session
+ * Get list of all periods with budgets for a session
  */
 export async function GET(
   request: NextRequest,
@@ -26,24 +31,25 @@ export async function GET(
       );
     }
 
-    // Get distinct period values from allocations
-    const allocations = await prisma.allocation.findMany({
+    // Get period budgets from period_budgets table
+    const periodBudgets = await prisma.periodBudget.findMany({
       where: { sessionId },
-      select: { period: true },
-      distinct: 'period',
+      orderBy: { period: 'asc' }
     });
 
-    // Extract period values and sort
-    const periods = allocations
-      .map(a => a.period)
-      .sort((a, b) => {
-        // null (default) comes first
-        if (a === null) return -1;
-        if (b === null) return 1;
-        return a.localeCompare(b);
-      });
+    // Sort: null (default) comes first, then alphabetically
+    const sorted = periodBudgets.sort((a, b) => {
+      if (a.period === null) return -1;
+      if (b.period === null) return 1;
+      return a.period.localeCompare(b.period);
+    });
 
-    return NextResponse.json({ periods });
+    return NextResponse.json({
+      periods: sorted.map(pb => ({
+        period: pb.period,
+        budget: pb.budget.toString()
+      }))
+    });
   } catch (error) {
     console.error('Error fetching periods:', error);
     return NextResponse.json(
@@ -55,7 +61,7 @@ export async function GET(
 
 /**
  * POST /api/sessions/[id]/periods
- * Add a new period (with option to copy existing allocations)
+ * Add a new period with budget (with option to copy existing allocations)
  */
 export async function POST(
   request: NextRequest,
@@ -64,15 +70,9 @@ export async function POST(
   try {
     const { id: sessionId } = await params;
     const body = await request.json();
-    const { period, copyFrom } = body;
+    const { period, budget, copyFrom } = periodSchema.parse(body);
 
-    // Validate period name
-    if (!period || typeof period !== 'string' || period.trim() === '') {
-      return NextResponse.json(
-        { error: 'Period name is required' },
-        { status: 400 }
-      );
-    }
+    const periodName = period.trim();
 
     // Verify session exists
     const session = await prisma.session.findUnique({
@@ -86,22 +86,34 @@ export async function POST(
       );
     }
 
-    // Check if period already exists
-    const existingAllocation = await prisma.allocation.findFirst({
+    // Check if period already exists in period_budgets
+    const existingPeriodBudget = await prisma.periodBudget.findUnique({
       where: {
-        sessionId,
-        period: period.trim(),
+        sessionId_period: {
+          sessionId,
+          period: periodName,
+        },
       },
     });
 
-    if (existingAllocation) {
+    if (existingPeriodBudget) {
       return NextResponse.json(
         { error: 'Period already exists' },
         { status: 409 }
       );
     }
 
-    if (copyFrom !== undefined && copyFrom !== null && copyFrom !== '') {
+    // Create period budget
+    await prisma.periodBudget.create({
+      data: {
+        sessionId,
+        period: periodName,
+        budget: BigInt(budget)
+      }
+    });
+
+    // Handle allocation copying if copyFrom is provided
+    if (copyFrom !== undefined && copyFrom !== '') {
       // Copy allocations from another period
       const sourceAllocations = await prisma.allocation.findMany({
         where: {
@@ -120,13 +132,14 @@ export async function POST(
             percentage: allocation.percentage,
             amount: allocation.amount,
             quantity: allocation.quantity,
-            period: period.trim(),
+            period: periodName,
           })),
         });
 
         return NextResponse.json({
           success: true,
-          period: period.trim(),
+          period: periodName,
+          budget: budget.toString(),
           copied: sourceAllocations.length,
         });
       }
@@ -208,7 +221,7 @@ export async function POST(
           percentage,
           amount: BigInt(0),
           quantity: 0,
-          period: period.trim(),
+          period: periodName,
         };
       });
 
@@ -221,10 +234,18 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      period: period.trim(),
+      period: periodName,
+      budget: budget.toString(),
       copied: 0,
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: error.errors },
+        { status: 400 }
+      );
+    }
+
     console.error('Error adding period:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
