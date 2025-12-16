@@ -1361,11 +1361,12 @@ export default function SpreadsheetPage() {
             <div className="flex gap-2">
               <button
                 onClick={() => setShowUploadModal(true)}
-                disabled={loadingOperations.csvImport}
+                disabled={loadingOperations.csvImport || skuData.length > 0}
                 className="btn btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={skuData.length > 0 ? 'SKUデータは既に取り込まれています' : 'CSVファイルからSKUデータを取り込む'}
               >
                 <Upload size={20} />
-                CSV取り込み
+                {skuData.length > 0 ? 'CSV取り込み済み' : 'CSV取り込み'}
               </button>
               {skuData.length > 0 && (
                 <button
