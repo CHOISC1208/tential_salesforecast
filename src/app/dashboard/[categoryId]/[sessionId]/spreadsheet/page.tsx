@@ -549,12 +549,14 @@ export default function SpreadsheetPage() {
       })
 
       if (response.ok) {
-        alert('期間を追加しました')
+        // Close modal first
         setShowPeriodModal(false)
         setPeriodModalValue('')
         setPeriodModalBudget('')
         setPeriodModalCopyFrom(null)
-        loadData()
+        // Reload data and wait for completion
+        await loadData()
+        alert('期間を追加しました')
       } else {
         const error = await response.json()
         alert(`期間の追加に失敗しました: ${error.error}`)
@@ -588,12 +590,14 @@ export default function SpreadsheetPage() {
       })
 
       if (response.ok) {
-        alert('期間名と予算を変更しました')
+        // Close modal first
         setShowPeriodModal(false)
         setPeriodModalValue('')
         setPeriodModalNewValue('')
         setPeriodModalBudget('')
-        loadData()
+        // Reload data and wait for completion
+        await loadData()
+        alert('期間名と予算を変更しました')
       } else {
         const error = await response.json()
         alert(`期間名の変更に失敗しました: ${error.error}`)
@@ -616,10 +620,12 @@ export default function SpreadsheetPage() {
       })
 
       if (response.ok) {
-        alert('期間を削除しました')
+        // Close modal first
         setShowPeriodModal(false)
         setPeriodModalValue('')
-        loadData()
+        // Reload data and wait for completion
+        await loadData()
+        alert('期間を削除しました')
       } else {
         const error = await response.json()
         alert(`期間の削除に失敗しました: ${error.error}`)
