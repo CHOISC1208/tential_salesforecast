@@ -5,7 +5,8 @@ import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 
 const autoAllocateSchema = z.object({
-  level: z.number().int().positive()
+  level: z.number().int().positive(),
+  period: z.string().nullable().optional()
 })
 
 export async function POST(
@@ -35,7 +36,8 @@ export async function POST(
       include: {
         hierarchyDefinitions: {
           orderBy: { level: 'asc' }
-        }
+        },
+        periodBudgets: true
       }
     })
 
@@ -47,7 +49,17 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { level } = autoAllocateSchema.parse(body)
+    const { level, period = null } = autoAllocateSchema.parse(body)
+
+    // Get period budget
+    const periodBudget = budgetSession.periodBudgets.find(pb => pb.period === period)
+
+    if (!periodBudget) {
+      return NextResponse.json(
+        { error: 'Period budget not found' },
+        { status: 404 }
+      )
+    }
 
     // Get all SKU data
     const skuData = await prisma.skuData.findMany({
@@ -94,8 +106,8 @@ export async function POST(
 
     const paths = Array.from(hierarchyPaths)
     const percentage = paths.length > 0 ? 100 / paths.length : 0
-    const totalBudget = Number(budgetSession.totalBudget)
-    const amount = Math.floor(totalBudget * (percentage / 100))
+    const budget = Number(periodBudget.budget)
+    const amount = Math.floor(budget * (percentage / 100))
 
     // Create allocations
     const allocations = paths.map(path => ({
@@ -104,14 +116,16 @@ export async function POST(
       level,
       percentage,
       amount: BigInt(amount),
-      quantity: 0 // Will be calculated on frontend based on SKU details
+      quantity: 0, // Will be calculated on frontend based on SKU details
+      period
     }))
 
-    // Delete existing allocations for this level
+    // Delete existing allocations for this level and period
     await prisma.allocation.deleteMany({
       where: {
         sessionId: id,
-        level
+        level,
+        period
       }
     })
 

@@ -6,11 +6,16 @@ import { useSession } from 'next-auth/react'
 import { ArrowLeft, Save, ChevronDown, ChevronRight, ChevronUp, Download, Calendar, Plus, Edit2, Trash2, Upload } from 'lucide-react'
 import Papa from 'papaparse'
 
+interface PeriodBudget {
+  period: string | null
+  budget: string
+}
+
 interface Session {
   id: string
   name: string
-  totalBudget: string
   status: string
+  periodBudgets: PeriodBudget[]
   hierarchyDefinitions: Array<{
     level: number
     columnName: string
@@ -72,8 +77,7 @@ export default function SpreadsheetPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [focusedPath, setFocusedPath] = useState<string | null>(null)
-  const [showBudgetEditModal, setShowBudgetEditModal] = useState(false)
-  const [newBudget, setNewBudget] = useState('')
+  const [editingAmount, setEditingAmount] = useState<{ path: string; period: string | null } | null>(null)
   const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false)
   const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
@@ -85,6 +89,7 @@ export default function SpreadsheetPage() {
   const [periodModalMode, setPeriodModalMode] = useState<'add' | 'rename' | 'delete'>('add')
   const [periodModalValue, setPeriodModalValue] = useState<string | null>(null)
   const [periodModalNewValue, setPeriodModalNewValue] = useState('')
+  const [periodModalBudget, setPeriodModalBudget] = useState('')
   const [periodModalCopyFrom, setPeriodModalCopyFrom] = useState<string | null>(null)
 
   useEffect(() => {
@@ -107,6 +112,8 @@ export default function SpreadsheetPage() {
 
       if (sessionRes.ok) {
         const sessionData = await sessionRes.json()
+        console.log('Session data loaded:', sessionData)
+        console.log('Period budgets:', sessionData.periodBudgets)
         setSession(sessionData)
       }
 
@@ -150,6 +157,8 @@ export default function SpreadsheetPage() {
   const buildHierarchyTree = (): HierarchyNode[] => {
     if (!session || skuData.length === 0) return []
 
+    console.log('buildHierarchyTree called, allocations count:', allocations.length)
+
     const tree: HierarchyNode[] = []
     const nodeMap = new Map<string, HierarchyNode>()
 
@@ -173,6 +182,10 @@ export default function SpreadsheetPage() {
               amount: parseInt(alloc.amount),
               quantity: alloc.quantity
             })
+          }
+
+          if (nodeAllocations.length > 0) {
+            console.log('Node allocations for path:', path, Array.from(periodData.entries()))
           }
 
           const node: HierarchyNode = {
@@ -302,29 +315,97 @@ export default function SpreadsheetPage() {
     setExpandedGroups(new Set())
   }
 
-  const getParentAmount = (path: string, allocs = allocations): number => {
+  const getParentAmount = (path: string, period: string | null, allocs = allocations): number => {
     if (!session) return 0
 
     const pathParts = path.split('/')
     if (pathParts.length === 1) {
-      return parseInt(session.totalBudget)
+      // L1: use period budget
+      const periodBudget = session.periodBudgets.find(pb => pb.period === period)
+      return periodBudget ? parseInt(periodBudget.budget) : 0
     }
 
     const parentPath = pathParts.slice(0, -1).join('/')
-    const parentAlloc = allocs.find((a: Allocation) => a.hierarchyPath === parentPath)
+    const parentAlloc = allocs.find((a: Allocation) => a.hierarchyPath === parentPath && a.period === period)
 
     if (parentAlloc) {
       return parseInt(parentAlloc.amount)
     }
 
-    return parseInt(session.totalBudget)
+    // Fallback: use period budget
+    const periodBudget = session.periodBudgets.find(pb => pb.period === period)
+    return periodBudget ? parseInt(periodBudget.budget) : 0
   }
 
   const updateAllocation = (path: string, period: string | null, percentage: number) => {
     if (!session) return
 
-    const parentAmount = getParentAmount(path, allocations)
+    const parentAmount = getParentAmount(path, period, allocations)
     const amount = Math.floor(parentAmount * (percentage / 100))
+
+    console.log('updateAllocation called:', {
+      path,
+      period,
+      percentage,
+      parentAmount,
+      calculatedAmount: amount
+    })
+
+    const pathLevel = path.split('/').length
+    let relatedSkus: SkuData[] = []
+
+    if (pathLevel === session.hierarchyDefinitions.length + 1) {
+      const skuCode = path.split('/').pop()
+      relatedSkus = skuData.filter(sku => sku.skuCode === skuCode)
+    } else {
+      relatedSkus = skuData.filter(sku => {
+        const skuPath = buildHierarchyPath(sku, session.hierarchyDefinitions, pathLevel)
+        return skuPath === path
+      })
+    }
+
+    const totalUnitPrice = relatedSkus.reduce((sum, sku) => sum + sku.unitPrice, 0)
+    const quantity = totalUnitPrice > 0 ? Math.floor(amount / totalUnitPrice) : 0
+
+    const existingIndex = allocations.findIndex(a => a.hierarchyPath === path && a.period === period)
+    let updated: Allocation[]
+
+    if (existingIndex >= 0) {
+      updated = [...allocations]
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        percentage,
+        amount: amount.toString(),
+        quantity
+      }
+    } else {
+      updated = [...allocations, {
+        hierarchyPath: path,
+        level: pathLevel,
+        percentage,
+        amount: amount.toString(),
+        quantity,
+        period
+      }]
+    }
+
+    console.log('Updated allocations:', updated.filter(a => a.hierarchyPath === path))
+    setAllocations(updated)
+  }
+
+  const updateAllocationByAmount = (path: string, period: string | null, amount: number) => {
+    if (!session) return
+
+    const parentAmount = getParentAmount(path, period, allocations)
+
+    // Calculate percentage from amount: percentage = (amount / parentAmount) * 100
+    const percentage = parentAmount > 0 ? (amount / parentAmount) * 100 : 0
+
+    // Validate: amount should not exceed parent amount
+    if (amount > parentAmount) {
+      alert(`金額が親の配分額（¥${parentAmount.toLocaleString()}）を超えています`)
+      return
+    }
 
     const pathLevel = path.split('/').length
     let relatedSkus: SkuData[] = []
@@ -395,32 +476,7 @@ export default function SpreadsheetPage() {
     }
   }
 
-  const updateBudget = async () => {
-    if (!newBudget || parseInt(newBudget) <= 0) {
-      alert('有効な予算額を入力してください')
-      return
-    }
-
-    try {
-      const response = await fetch(`/api/sessions/${params.sessionId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ totalBudget: parseInt(newBudget) })
-      })
-
-      if (response.ok) {
-        setShowBudgetEditModal(false)
-        setNewBudget('')
-        loadData()
-        alert('予算額を更新しました')
-      } else {
-        alert('予算額の更新に失敗しました')
-      }
-    } catch (error) {
-      console.error('Error updating budget:', error)
-      alert('予算額の更新に失敗しました')
-    }
-  }
+  // Budget edit function removed - use period management instead
 
   const deleteSession = async () => {
     if (deleteConfirmText !== '削除') {
@@ -475,12 +531,18 @@ export default function SpreadsheetPage() {
       return
     }
 
+    if (!periodModalBudget || parseInt(periodModalBudget) <= 0) {
+      alert('有効な予算額を入力してください')
+      return
+    }
+
     try {
       const response = await fetch(`/api/sessions/${params.sessionId}/periods`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           period: periodModalValue.trim(),
+          budget: parseInt(periodModalBudget),
           copyFrom: periodModalCopyFrom
         })
       })
@@ -489,6 +551,7 @@ export default function SpreadsheetPage() {
         alert('期間を追加しました')
         setShowPeriodModal(false)
         setPeriodModalValue('')
+        setPeriodModalBudget('')
         setPeriodModalCopyFrom(null)
         loadData()
       } else {
@@ -647,9 +710,10 @@ export default function SpreadsheetPage() {
             const finalPercentage = cumulativePercentage * 100
             periodPercentages.push(finalPercentage.toFixed(4))
 
-            // 合計金額と数量を計算
-            const totalBudget = parseInt(session.totalBudget)
-            const calculatedAmount = Math.floor(totalBudget * cumulativePercentage)
+            // 合計金額と数量を計算 - use period-specific budget
+            const periodBudget = session.periodBudgets.find(pb => pb.period === period)
+            const budgetAmount = periodBudget ? parseInt(periodBudget.budget) : 0
+            const calculatedAmount = Math.floor(budgetAmount * cumulativePercentage)
             totalAmount += calculatedAmount
             totalQuantity += sku.unitPrice > 0 ? Math.floor(calculatedAmount / sku.unitPrice) : 0
           } else {
@@ -810,6 +874,38 @@ export default function SpreadsheetPage() {
     }, 0)
   }
 
+  const getSiblingsTotalAmount = (node: HierarchyNode, period: string | null): number => {
+    const pathParts = node.path.split('/')
+    if (pathParts.length === 1) {
+      // Level 1: sum all level 1 nodes
+      return hierarchyTree.reduce((sum, n) => {
+        const periodData = n.periodData.get(period)
+        return sum + (periodData?.amount || 0)
+      }, 0)
+    }
+
+    // Find siblings by looking for nodes with same parent
+    const parentPath = pathParts.slice(0, -1).join('/')
+    const findSiblings = (nodes: HierarchyNode[]): HierarchyNode[] => {
+      for (const n of nodes) {
+        if (n.path === parentPath) {
+          return n.children
+        }
+        if (n.children.length > 0) {
+          const found = findSiblings(n.children)
+          if (found.length > 0) return found
+        }
+      }
+      return []
+    }
+
+    const siblings = findSiblings(hierarchyTree)
+    return siblings.reduce((sum, n) => {
+      const periodData = n.periodData.get(period)
+      return sum + (periodData?.amount || 0)
+    }, 0)
+  }
+
   // Helper function to get parent path
   const getParentPath = (path: string): string | null => {
     const pathParts = path.split('/')
@@ -881,50 +977,93 @@ export default function SpreadsheetPage() {
               {node.unitPrice !== undefined ? `¥${node.unitPrice.toLocaleString()}` : ''}
             </td>
 
-            {/* 各期間の割合（グループ化） */}
+            {/* 各期間の割合と金額（期間ごとにグループ化） */}
             {availablePeriods.map(period => {
               const periodData = node.periodData.get(period)
               const percentage = periodData?.percentage || 0
+              const amount = periodData?.amount || 0
 
               const siblingsTotal = getSiblingsTotal(node, period)
               const remaining = 100 - siblingsTotal
               const isOverLimit = siblingsTotal > 100
+              const isEditing = editingAmount?.path === node.path && editingAmount?.period === period
+
+              // Amount calculations
+              const parentAmount = getParentAmount(node.path, period)
+              const siblingsTotalAmount = getSiblingsTotalAmount(node, period)
+              const remainingAmount = parentAmount - siblingsTotalAmount
+              const isAmountOverLimit = siblingsTotalAmount > parentAmount
 
               return (
-                <td key={`${period === null ? 'null' : period}-pct`} className="text-right py-2 px-4">
-                  <div className="flex flex-col items-end gap-1">
-                    <input
-                      type="number"
-                      value={percentage || ''}
-                      onChange={(e) => updateAllocation(node.path, period, parseFloat(e.target.value) || 0)}
-                      className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
-                        isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                      }`}
-                      min="0"
-                      max="100"
-                      step="0.01"
-                    />
-                    <div className="text-xs">
-                      {isOverLimit ? (
-                        <span className="text-red-600 font-medium">超過: {Math.abs(remaining).toFixed(1)}%</span>
-                      ) : (
-                        <span className="text-gray-500">残り: {remaining.toFixed(1)}%</span>
-                      )}
+                <Fragment key={`${period === null ? 'null' : period}`}>
+                  {/* 割合カラム */}
+                  <td className="text-right py-2 px-4">
+                    <div className="flex flex-col items-end gap-1">
+                      <input
+                        type="number"
+                        value={percentage || ''}
+                        onChange={(e) => updateAllocation(node.path, period, parseFloat(e.target.value) || 0)}
+                        className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
+                          isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                        }`}
+                        min="0"
+                        max="100"
+                        step="0.01"
+                      />
+                      <div className="text-xs">
+                        {isOverLimit ? (
+                          <span className="text-red-600 font-medium">超過: {Math.abs(remaining).toFixed(1)}%</span>
+                        ) : (
+                          <span className="text-gray-500">残り: {remaining.toFixed(1)}%</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </td>
-              )
-            })}
+                  </td>
 
-            {/* 各期間の金額（グループ化） */}
-            {availablePeriods.map(period => {
-              const periodData = node.periodData.get(period)
-              const amount = periodData?.amount || 0
-
-              return (
-                <td key={`${period === null ? 'null' : period}-amt`} className="text-right py-2 px-4 text-gray-900">
-                  {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
-                </td>
+                  {/* 金額カラム - editable with pencil icon */}
+                  <td className="text-right py-2 px-4">
+                    <div className="flex flex-col items-end gap-1">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          value={amount || ''}
+                          onChange={(e) => {
+                            const newAmount = parseInt(e.target.value) || 0
+                            updateAllocationByAmount(node.path, period, newAmount)
+                          }}
+                          onBlur={() => setEditingAmount(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === 'Escape') {
+                              setEditingAmount(null)
+                            }
+                          }}
+                          autoFocus
+                          className="w-28 px-2 py-1 border border-blue-500 rounded text-right text-gray-900"
+                        />
+                      ) : (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingAmount({ path: node.path, period })
+                          }}
+                          className="flex items-center justify-end gap-1 cursor-pointer hover:bg-blue-50 rounded px-1 py-1 group"
+                        >
+                          <span className="text-gray-900">
+                            {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
+                          </span>
+                          <Edit2 size={12} className="text-gray-400 group-hover:text-blue-600" />
+                        </div>
+                      )}
+                      <div className="text-xs">
+                        {isAmountOverLimit ? (
+                          <span className="text-red-600 font-medium">超過: ¥{Math.abs(remainingAmount).toLocaleString()}</span>
+                        ) : (
+                          <span className="text-gray-500">残り: ¥{remainingAmount.toLocaleString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                </Fragment>
               )
             })}
           </tr>
@@ -948,6 +1087,11 @@ export default function SpreadsheetPage() {
         <div className="text-xl">セッションが見つかりません</div>
       </div>
     )
+  }
+
+  // Initialize periodBudgets to empty array if not loaded
+  if (!session.periodBudgets) {
+    session.periodBudgets = []
   }
 
   const filteredTree = searchQuery ? filterNodes(hierarchyTree, searchQuery) : hierarchyTree
@@ -991,23 +1135,6 @@ export default function SpreadsheetPage() {
                 <h1 className="text-3xl font-bold text-gray-900">{session.name}</h1>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <p className="text-gray-700">
-                      総予算: ¥{parseInt(session.totalBudget).toLocaleString()}
-                    </p>
-                    {session.category?.userId === authSession?.user?.id && (
-                      <button
-                        onClick={() => {
-                          setNewBudget(session.totalBudget)
-                          setShowBudgetEditModal(true)
-                        }}
-                        className="text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        [編集]
-                      </button>
-                    )}
-                  </div>
-
                   {/* Period Management */}
                   {session.category?.userId === authSession?.user?.id && (
                     <div className="flex items-center gap-2 border-l pl-4">
@@ -1018,6 +1145,7 @@ export default function SpreadsheetPage() {
                           onClick={() => {
                             setPeriodModalMode('add')
                             setPeriodModalValue('')
+                            setPeriodModalBudget('')
                             setPeriodModalCopyFrom(availablePeriods[0] || null)
                             setShowPeriodModal(true)
                           }}
@@ -1034,7 +1162,7 @@ export default function SpreadsheetPage() {
                             }
                             setPeriodModalMode('rename')
                             setPeriodModalValue(availablePeriods[0])
-                            setPeriodModalNewValue(availablePeriods[0] === null ? '' : availablePeriods[0] || '')
+                            setPeriodModalNewValue(availablePeriods[0] || '')
                             setShowPeriodModal(true)
                           }}
                           className="p-1 text-blue-600 hover:bg-blue-50 rounded"
@@ -1195,31 +1323,57 @@ export default function SpreadsheetPage() {
             </div>
           </div>
 
+          {/* No periods message */}
+          {availablePeriods.length === 0 && (
+            <div className="card">
+              <div className="text-center py-8">
+                <p className="text-lg text-gray-900 mb-2">期間が設定されていません</p>
+                <p className="text-sm text-gray-600">
+                  右上の「期間管理」ボタンから期間と予算を追加してください
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="card overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 sticky top-0 z-20">
+                {/* First header row: Period names with budgets */}
                 <tr>
-                  <th className="text-left py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-30">
+                  <th rowSpan={2} className="text-left py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-30 border-r border-gray-300">
                     階層名
                   </th>
-                  <th className="text-center py-3 px-4 font-semibold text-gray-900">
+                  <th rowSpan={2} className="text-center py-3 px-4 font-semibold text-gray-900 border-r border-gray-300">
                     レベル
                   </th>
-                  <th className="text-right py-3 px-4 font-semibold text-gray-900">
+                  <th rowSpan={2} className="text-right py-3 px-4 font-semibold text-gray-900 border-r border-gray-300">
                     単価
                   </th>
-                  {/* Period percentage columns */}
+                  {/* Period headers with budgets in M-units */}
+                  {availablePeriods.map(period => {
+                    const periodBudget = session?.periodBudgets.find(pb => pb.period === period)
+                    const budgetInMillions = periodBudget ? (parseInt(periodBudget.budget) / 1000000).toFixed(2) : '0.00'
+                    const periodLabel = period === null ? 'デフォルト' : period
+
+                    return (
+                      <th key={`${period === null ? 'null' : period}-header`} colSpan={2} className="text-center py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                        {periodLabel} ({budgetInMillions}M)
+                      </th>
+                    )
+                  })}
+                </tr>
+                {/* Second header row: % and Amount columns */}
+                <tr>
                   {availablePeriods.map(period => (
-                    <th key={`${period === null ? 'null' : period}-pct`} className="text-right py-3 px-4 font-semibold text-gray-900">
-                      {period === null ? 'デフォルト' : period}(%)
-                    </th>
-                  ))}
-                  {/* Period amount columns */}
-                  {availablePeriods.map(period => (
-                    <th key={`${period === null ? 'null' : period}-amt`} className="text-right py-3 px-4 font-semibold text-gray-900">
-                      {period === null ? 'デフォルト' : period}(円)
-                    </th>
+                    <Fragment key={`${period === null ? 'null' : period}-subheader`}>
+                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                        %
+                      </th>
+                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                        金額
+                      </th>
+                    </Fragment>
                   ))}
                 </tr>
               </thead>
@@ -1238,42 +1392,6 @@ export default function SpreadsheetPage() {
           </div>
         </div>
       </main>
-
-      {/* Budget Edit Modal */}
-      {showBudgetEditModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">予算額の編集</h2>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-900 mb-2">新しい予算額</label>
-              <input
-                type="number"
-                value={newBudget}
-                onChange={(e) => setNewBudget(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="100000000"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={updateBudget}
-                className="btn btn-primary flex-1"
-              >
-                更新
-              </button>
-              <button
-                onClick={() => {
-                  setShowBudgetEditModal(false)
-                  setNewBudget('')
-                }}
-                className="btn btn-secondary flex-1"
-              >
-                キャンセル
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Delete Session Modal */}
       {showDeleteSessionModal && (
@@ -1379,6 +1497,16 @@ export default function SpreadsheetPage() {
                   />
                 </div>
                 <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">予算額</label>
+                  <input
+                    type="number"
+                    value={periodModalBudget}
+                    onChange={(e) => setPeriodModalBudget(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="100000000"
+                  />
+                </div>
+                <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-900 mb-2">コピー元期間（オプション）</label>
                   <select
                     value={periodModalCopyFrom === null ? 'null' : periodModalCopyFrom || ''}
@@ -1414,7 +1542,7 @@ export default function SpreadsheetPage() {
                   >
                     {availablePeriods.map(period => (
                       <option key={period === null ? 'null' : period} value={period === null ? 'null' : period}>
-                        {period === null ? 'デフォルト' : period}
+                        {period === null ? 'デフォルト期間' : period}
                       </option>
                     ))}
                   </select>
@@ -1443,13 +1571,13 @@ export default function SpreadsheetPage() {
                   >
                     {availablePeriods.map(period => (
                       <option key={period === null ? 'null' : period} value={period === null ? 'null' : period}>
-                        {period === null ? 'デフォルト' : period}
+                        {period === null ? 'デフォルト期間' : period}
                       </option>
                     ))}
                   </select>
                 </div>
                 <p className="text-gray-900 mb-4">
-                  期間「{periodModalValue === null ? 'デフォルト' : periodModalValue}」を削除しますか？
+                  期間「{periodModalValue === null ? 'デフォルト期間' : periodModalValue}」を削除しますか？
                   この期間の全ての配分データが削除されます。この操作は元に戻せません。
                 </p>
               </>
@@ -1473,6 +1601,7 @@ export default function SpreadsheetPage() {
                   setShowPeriodModal(false)
                   setPeriodModalValue('')
                   setPeriodModalNewValue('')
+                  setPeriodModalBudget('')
                   setPeriodModalCopyFrom(null)
                 }}
                 className="btn btn-secondary flex-1"

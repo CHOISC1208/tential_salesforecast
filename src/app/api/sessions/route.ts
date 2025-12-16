@@ -6,8 +6,7 @@ import { z } from 'zod'
 
 const sessionSchema = z.object({
   categoryId: z.string().uuid(),
-  name: z.string().min(1).max(200),
-  totalBudget: z.number().int().positive()
+  name: z.string().min(1).max(200)
 })
 
 export async function GET(request: NextRequest) {
@@ -44,6 +43,9 @@ export async function GET(request: NextRequest) {
               select: { name: true, email: true }
             }
           }
+        },
+        periodBudgets: {
+          orderBy: { period: 'asc' }
         }
       },
       orderBy: { createdAt: 'desc' }
@@ -52,7 +54,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       sessions.map(s => ({
         ...s,
-        totalBudget: s.totalBudget.toString()
+        periodBudgets: s.periodBudgets.map(pb => ({
+          ...pb,
+          budget: pb.budget.toString()
+        }))
       }))
     )
   } catch (error) {
@@ -76,7 +81,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { categoryId, name, totalBudget } = sessionSchema.parse(body)
+    const { categoryId, name } = sessionSchema.parse(body)
 
     // Verify category exists
     const category = await prisma.category.findUnique({
@@ -90,22 +95,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Create session without periods (user will add periods later)
     const newSession = await prisma.session.create({
       data: {
         categoryId,
         name,
-        totalBudget: BigInt(totalBudget),
         status: 'draft'
       },
       include: {
-        category: true
+        category: true,
+        periodBudgets: true
       }
     })
 
     return NextResponse.json(
       {
         ...newSession,
-        totalBudget: newSession.totalBudget.toString()
+        periodBudgets: newSession.periodBudgets.map(pb => ({
+          ...pb,
+          budget: pb.budget.toString()
+        }))
       },
       { status: 201 }
     )

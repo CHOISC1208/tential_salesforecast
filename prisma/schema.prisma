@@ -9,7 +9,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["sales_plane"]
+  schemas  = ["sales_forecast"]
 }
 
 model User {
@@ -22,7 +22,7 @@ model User {
   categories    Category[]
 
   @@map("users")
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
 }
 
 model Category {
@@ -35,14 +35,13 @@ model Category {
   sessions  Session[]
 
   @@map("categories")
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
 }
 
 model Session {
   id                    String                 @id @default(uuid())
   categoryId            String                 @map("category_id")
   name                  String
-  totalBudget           BigInt                 @map("total_budget")
   status                SessionStatus          @default(draft)
   createdAt             DateTime               @default(now()) @map("created_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
@@ -50,9 +49,10 @@ model Session {
   hierarchyDefinitions  HierarchyDefinition[]
   skuData               SkuData[]
   allocations           Allocation[]
+  periodBudgets         PeriodBudget[]
 
   @@map("sessions")
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
 }
 
 enum SessionStatus {
@@ -60,7 +60,7 @@ enum SessionStatus {
   confirmed
   archived
 
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
 }
 
 model HierarchyDefinition {
@@ -73,7 +73,7 @@ model HierarchyDefinition {
 
   @@unique([sessionId, level])
   @@map("hierarchy_definitions")
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
 }
 
 model SkuData {
@@ -87,7 +87,7 @@ model SkuData {
 
   @@unique([sessionId, skuCode])
   @@map("sku_data")
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
 }
 
 model Allocation {
@@ -104,5 +104,19 @@ model Allocation {
 
   @@unique([sessionId, hierarchyPath, period])
   @@map("allocations")
-  @@schema("sales_plane")
+  @@schema("sales_forecast")
+}
+
+model PeriodBudget {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  period    String?
+  budget    BigInt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, period])
+  @@map("period_budgets")
+  @@schema("sales_forecast")
 }

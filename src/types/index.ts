@@ -18,8 +18,16 @@ export interface Session {
   id: string
   categoryId: string
   name: string
-  totalBudget: bigint
   status: SessionStatus
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface PeriodBudget {
+  id: string
+  sessionId: string
+  period: string | null
+  budget: bigint
   createdAt: Date
   updatedAt: Date
 }
@@ -49,6 +57,7 @@ export interface Allocation {
   percentage: number
   amount: bigint
   quantity: number
+  period: string | null
   updatedAt: Date
 }
 
