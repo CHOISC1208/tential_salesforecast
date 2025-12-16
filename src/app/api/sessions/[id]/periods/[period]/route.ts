@@ -43,7 +43,7 @@ export async function PUT(
       where: {
         sessionId_period: {
           sessionId,
-          period: actualOldPeriod,
+          period: actualOldPeriod as string,
         },
       },
     });
@@ -79,7 +79,7 @@ export async function PUT(
         where: {
           sessionId_period: {
             sessionId,
-            period: actualOldPeriod,
+            period: actualOldPeriod as string,
           },
         },
       });
@@ -97,7 +97,7 @@ export async function PUT(
       const allocationsResult = await tx.allocation.updateMany({
         where: {
           sessionId,
-          period: actualOldPeriod,
+          period: actualOldPeriod as string | null,
         },
         data: {
           period: newPeriod.trim(),
@@ -155,7 +155,7 @@ export async function DELETE(
       where: {
         sessionId_period: {
           sessionId,
-          period: actualPeriod,
+          period: actualPeriod as string,
         },
       },
     });
@@ -172,7 +172,7 @@ export async function DELETE(
       where: {
         sessionId_period: {
           sessionId,
-          period: actualPeriod,
+          period: actualPeriod as string,
         },
       },
     });
@@ -181,7 +181,7 @@ export async function DELETE(
     const result = await prisma.allocation.deleteMany({
       where: {
         sessionId,
-        period: actualPeriod,
+        period: actualPeriod as string | null,
       },
     });
 
