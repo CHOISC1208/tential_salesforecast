@@ -1089,13 +1089,9 @@ export default function SpreadsheetPage() {
     )
   }
 
-  // Guard: Check if periodBudgets is loaded
-  if (!session.periodBudgets || session.periodBudgets.length === 0) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-xl">期間予算データを読み込み中...</div>
-      </div>
-    )
+  // Initialize periodBudgets to empty array if not loaded
+  if (!session.periodBudgets) {
+    session.periodBudgets = []
   }
 
   const filteredTree = searchQuery ? filterNodes(hierarchyTree, searchQuery) : hierarchyTree
@@ -1326,6 +1322,18 @@ export default function SpreadsheetPage() {
               </div>
             </div>
           </div>
+
+          {/* No periods message */}
+          {availablePeriods.length === 0 && (
+            <div className="card">
+              <div className="text-center py-8">
+                <p className="text-lg text-gray-900 mb-2">期間が設定されていません</p>
+                <p className="text-sm text-gray-600">
+                  右上の「期間管理」ボタンから期間と予算を追加してください
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Table */}
           <div className="card overflow-x-auto">
