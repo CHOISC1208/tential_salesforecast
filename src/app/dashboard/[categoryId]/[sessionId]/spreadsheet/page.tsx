@@ -725,10 +725,20 @@ export default function SpreadsheetPage() {
               console.log(`  Level ${level} (${levelPath}): ${levelAllocation ? levelAllocation.percentage + '%' : 'NOT FOUND'}`)
             }
 
-            if (levelAllocation && levelAllocation.percentage > 0) {
-              cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
+            if (levelAllocation) {
+              // 配分レコードが存在する場合は、その割合を掛ける（0%でも）
               hasAllocation = true
+              cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
+
+              // 0%の場合は早期終了（これより下の階層を見ても結果は0%のまま）
+              if (levelAllocation.percentage === 0) {
+                if (isFirstSku) {
+                  console.log(`  → 0% detected, early exit`)
+                }
+                break
+              }
             }
+            // NOT FOUNDの場合は100%パススルー（掛け算しない = 1.0を掛けるのと同じ）
           }
 
           if (isFirstSku) {
