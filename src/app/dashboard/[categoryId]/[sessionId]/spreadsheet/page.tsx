@@ -316,6 +316,67 @@ export default function SpreadsheetPage() {
     setExpandedGroups(new Set())
   }
 
+  // 進捗計算：全SKU×期間のうち、配分済みの割合を計算
+  const calculateProgress = () => {
+    if (!session || skuData.length === 0 || availablePeriods.length === 0) {
+      return { allocated: 0, total: 0, percentage: 0, byPeriod: [] }
+    }
+
+    const totalSlots = skuData.length * availablePeriods.length
+    let allocatedSlots = 0
+    const byPeriod: { period: string | null; allocated: number; total: number; percentage: number }[] = []
+
+    availablePeriods.forEach(period => {
+      const periodAllocations = allocations.filter((a: Allocation & { period?: string | null }) => a.period === period)
+      let periodAllocatedCount = 0
+
+      skuData.forEach(sku => {
+        // SKUまでのパスを構築
+        const parentPath = buildHierarchyPath(sku, session.hierarchyDefinitions, session.hierarchyDefinitions.length)
+        const skuPath = parentPath ? `${parentPath}/${sku.skuCode}` : sku.skuCode
+        const pathParts = skuPath.split('/')
+
+        // 累積割合を計算（CSV exportと同じロジック）
+        let cumulativePercentage = 1.0
+        let hasAllocation = false
+        const hierarchyLevels = pathParts.length - 1
+
+        for (let level = 1; level <= hierarchyLevels; level++) {
+          const levelPath = pathParts.slice(0, level).join('/')
+          const levelAllocation = periodAllocations.find((a: Allocation & { period?: string | null }) => a.hierarchyPath === levelPath)
+
+          if (levelAllocation) {
+            hasAllocation = true
+            cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
+            if (levelAllocation.percentage === 0) break
+          }
+        }
+
+        // 配分がある場合にカウント
+        if (hasAllocation && cumulativePercentage > 0) {
+          allocatedSlots++
+          periodAllocatedCount++
+        }
+      })
+
+      byPeriod.push({
+        period,
+        allocated: periodAllocatedCount,
+        total: skuData.length,
+        percentage: skuData.length > 0 ? (periodAllocatedCount / skuData.length) * 100 : 0
+      })
+    })
+
+    return {
+      allocated: allocatedSlots,
+      total: totalSlots,
+      percentage: totalSlots > 0 ? (allocatedSlots / totalSlots) * 100 : 0,
+      byPeriod
+    }
+  }
+
+  const progress = calculateProgress()
+
   const getParentAmount = (path: string, period: string | null, allocs = allocations): number => {
     if (!session) return 0
 
@@ -707,23 +768,11 @@ export default function SpreadsheetPage() {
           let cumulativePercentage = 1.0 // 100%から開始
           let hasAllocation = false
 
-          // Debug: Log for first SKU only, all periods
-          const isFirstSku = skuData.indexOf(sku) === 0
-          if (isFirstSku) {
-            console.log(`\n=== Period: ${period} ===`)
-            console.log(`SKU: ${sku.skuCode}`)
-            console.log(`Path: ${skuPath}`)
-          }
-
           // 各階層レベルの割合を掛け算（SKUレベルは除く、階層レベルのみ）
           const hierarchyLevels = pathParts.length - 1 // 最後はSKUなので除く
           for (let level = 1; level <= hierarchyLevels; level++) {
             const levelPath = pathParts.slice(0, level).join('/')
             const levelAllocation = periodAllocations.find((a: Allocation & { period?: string | null }) => a.hierarchyPath === levelPath)
-
-            if (isFirstSku) {
-              console.log(`  Level ${level} (${levelPath}): ${levelAllocation ? levelAllocation.percentage + '%' : 'NOT FOUND'}`)
-            }
 
             if (levelAllocation) {
               // 配分レコードが存在する場合は、その割合を掛ける（0%でも）
@@ -732,17 +781,10 @@ export default function SpreadsheetPage() {
 
               // 0%の場合は早期終了（これより下の階層を見ても結果は0%のまま）
               if (levelAllocation.percentage === 0) {
-                if (isFirstSku) {
-                  console.log(`  → 0% detected, early exit`)
-                }
                 break
               }
             }
             // NOT FOUNDの場合は100%パススルー（掛け算しない = 1.0を掛けるのと同じ）
-          }
-
-          if (isFirstSku) {
-            console.log(`  Final: ${(cumulativePercentage * 100).toFixed(4)}%`)
           }
 
           // 階層に配分がある場合のみ出力
@@ -761,13 +803,6 @@ export default function SpreadsheetPage() {
           }
         })
 
-        // Debug: Log first few SKUs
-        if (skuData.indexOf(sku) < 3) {
-          console.log(`SKU ${skuData.indexOf(sku)}: ${sku.skuCode}`)
-          console.log(`  Path: ${skuPath}`)
-          console.log(`  Period Percentages:`, periodPercentages)
-        }
-
         // 行データを作成
         const row = [
           ...hierarchyValues,
@@ -777,12 +812,6 @@ export default function SpreadsheetPage() {
           totalAmount > 0 ? totalAmount.toString() : '',
           totalQuantity > 0 ? totalQuantity.toString() : ''
         ]
-
-        // Debug: Log first few rows
-        if (skuData.indexOf(sku) < 3) {
-          console.log(`  Row data:`, row)
-          console.log('---')
-        }
 
         rows.push(row)
       })
@@ -1385,6 +1414,53 @@ export default function SpreadsheetPage() {
                 </button>
               </div>
             </div>
+
+            {/* 進捗表示 */}
+            {availablePeriods.length > 0 && skuData.length > 0 && (
+              <div className="mt-6 border-t pt-4">
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold text-gray-900">配分進捗</h4>
+                    <span className="text-sm font-medium text-gray-900">
+                      {progress.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+                  {/* 全体プログレスバー */}
+                  <div className="w-full bg-gray-200 rounded-full h-6 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-blue-500 to-blue-600 h-full flex items-center justify-center text-white text-xs font-medium transition-all duration-300"
+                      style={{ width: `${Math.min(progress.percentage, 100)}%` }}
+                    >
+                      {progress.percentage > 5 && `${progress.allocated} / ${progress.total}`}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">
+                    全{progress.total}スロット（{skuData.length} SKUs × {availablePeriods.length} 期間）のうち {progress.allocated} スロット配分済み
+                  </p>
+                </div>
+
+                {/* 期間別進捗 */}
+                <div className="space-y-2">
+                  <h5 className="text-xs font-semibold text-gray-700">期間別:</h5>
+                  {progress.byPeriod.map((p, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <span className="text-xs text-gray-700 w-24 truncate" title={p.period || 'デフォルト'}>
+                        {p.period || 'デフォルト'}:
+                      </span>
+                      <div className="flex-1 bg-gray-200 rounded-full h-4 overflow-hidden">
+                        <div
+                          className="bg-blue-500 h-full transition-all duration-300"
+                          style={{ width: `${Math.min(p.percentage, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-600 w-20 text-right">
+                        {p.allocated}/{p.total} ({p.percentage.toFixed(0)}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* No periods message */}
