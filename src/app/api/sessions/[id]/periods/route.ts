@@ -45,10 +45,7 @@ export async function GET(
     });
 
     return NextResponse.json({
-      periods: sorted.map(pb => ({
-        period: pb.period,
-        budget: pb.budget.toString()
-      }))
+      periods: sorted.map(pb => pb.period)
     });
   } catch (error) {
     console.error('Error fetching periods:', error);
