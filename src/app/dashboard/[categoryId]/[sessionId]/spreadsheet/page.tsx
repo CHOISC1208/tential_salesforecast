@@ -906,36 +906,6 @@ export default function SpreadsheetPage() {
     }, 0)
   }
 
-  const getParentAmount = (node: HierarchyNode, period: string | null): number => {
-    const pathParts = node.path.split('/')
-    if (pathParts.length === 1) {
-      // Level 1: use period budget as parent amount
-      const periodBudget = periodBudgets.find(pb => pb.period === period)
-      return periodBudget ? parseInt(periodBudget.budget) : 0
-    }
-
-    // Find parent node
-    const parentPath = pathParts.slice(0, -1).join('/')
-    const findParent = (nodes: HierarchyNode[]): HierarchyNode | null => {
-      for (const n of nodes) {
-        if (n.path === parentPath) {
-          return n
-        }
-        if (n.children.length > 0) {
-          const found = findParent(n.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-
-    const parent = findParent(hierarchyTree)
-    if (!parent) return 0
-
-    const parentPeriodData = parent.periodData.get(period)
-    return parentPeriodData?.amount || 0
-  }
-
   // Helper function to get parent path
   const getParentPath = (path: string): string | null => {
     const pathParts = path.split('/')
@@ -1019,7 +989,7 @@ export default function SpreadsheetPage() {
               const isEditing = editingAmount?.path === node.path && editingAmount?.period === period
 
               // Amount calculations
-              const parentAmount = getParentAmount(node, period)
+              const parentAmount = getParentAmount(node.path, period)
               const siblingsTotalAmount = getSiblingsTotalAmount(node, period)
               const remainingAmount = parentAmount - siblingsTotalAmount
               const isAmountOverLimit = siblingsTotalAmount > parentAmount
