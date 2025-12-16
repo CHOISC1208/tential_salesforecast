@@ -939,10 +939,6 @@ export default function SpreadsheetPage() {
     return nodes.flatMap((node, index) => {
       const colors = levelColorPalette[(node.level - 1) % levelColorPalette.length]
 
-      // Check if this row is a sibling of the focused input
-      const isRowSiblingOfFocused = focusedInput && areSiblings(node.path, focusedInput.path)
-      const isRowFocused = focusedInput && node.path === focusedInput.path
-
       // Handle row click to toggle group
       const handleRowClick = (e: React.MouseEvent) => {
         // Don't toggle if clicking on input, button, or interactive elements
@@ -958,17 +954,11 @@ export default function SpreadsheetPage() {
       return (
         <Fragment key={node.path}>
           <tr
-            className={`border-b border-gray-200 ${
-              isRowFocused ? 'ring-2 ring-blue-400 bg-blue-50' :
-              isRowSiblingOfFocused ? 'bg-blue-50/50' : colors.bg
-            } ${colors.hover} transition-colors duration-150 ${node.children.length > 0 ? 'cursor-pointer' : ''}`}
+            className={`border-b border-gray-200 ${colors.bg} ${colors.hover} transition-colors duration-150 ${node.children.length > 0 ? 'cursor-pointer' : ''}`}
             onClick={handleRowClick}
           >
             {/* 階層名 */}
-            <td className={`py-2 px-4 sticky left-0 ${
-              isRowFocused ? 'bg-blue-50' :
-              isRowSiblingOfFocused ? 'bg-blue-50/50' : colors.bg
-            } z-10`} style={{ paddingLeft: `${depth * 24 + 16}px` }}>
+            <td className={`py-2 px-4 sticky left-0 ${colors.bg} z-10`} style={{ paddingLeft: `${depth * 24 + 16}px` }}>
               <div className="flex items-center gap-2">
                 {node.children.length > 0 && (
                   <button
@@ -1031,7 +1021,6 @@ export default function SpreadsheetPage() {
                         onFocus={() => setFocusedInput({ path: node.path, period })}
                         onBlur={() => setFocusedInput(null)}
                         className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
-                          isInputFocused ? 'border-blue-600 border-2 ring-2 ring-blue-200' :
                           isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
                         }`}
                         min="0"

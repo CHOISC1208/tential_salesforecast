@@ -63,56 +63,77 @@ export async function PUT(
       );
     }
 
-    // Check if new period name already exists
-    const existingPeriodBudget = await prisma.periodBudget.findUnique({
-      where: {
-        sessionId_period: {
-          sessionId,
-          period: newPeriod.trim(),
-        },
-      },
-    });
+    // Check if period name is actually changing
+    const isPeriodNameChanging = actualOldPeriod !== newPeriod.trim();
 
-    if (existingPeriodBudget) {
-      return NextResponse.json(
-        { error: 'New period name already exists' },
-        { status: 409 }
-      );
-    }
-
-    // Use transaction to update both period budget and allocations
-    const result = await prisma.$transaction(async (tx) => {
-      // Delete old period budget (unique constraint)
-      await tx.periodBudget.delete({
+    // If period name is changing, check if new name already exists
+    if (isPeriodNameChanging) {
+      const existingPeriodBudget = await prisma.periodBudget.findUnique({
         where: {
           sessionId_period: {
             sessionId,
-            period: actualOldPeriod as string,
+            period: newPeriod.trim(),
           },
         },
       });
 
-      // Create new period budget with updated or same budget value
-      await tx.periodBudget.create({
-        data: {
-          sessionId,
-          period: newPeriod.trim(),
-          budget: budget !== undefined ? BigInt(budget) : oldPeriodBudget.budget,
-        },
-      });
+      if (existingPeriodBudget) {
+        return NextResponse.json(
+          { error: 'New period name already exists' },
+          { status: 409 }
+        );
+      }
+    }
 
-      // Update all allocations with the new period name
-      const allocationsResult = await tx.allocation.updateMany({
-        where: {
-          sessionId,
-          period: actualOldPeriod as string | null,
-        },
-        data: {
-          period: newPeriod.trim(),
-        },
-      });
+    // Use transaction to update period budget and allocations
+    const result = await prisma.$transaction(async (tx) => {
+      if (isPeriodNameChanging) {
+        // Period name is changing: delete old and create new
+        await tx.periodBudget.delete({
+          where: {
+            sessionId_period: {
+              sessionId,
+              period: actualOldPeriod as string,
+            },
+          },
+        });
 
-      return { updated: allocationsResult.count };
+        await tx.periodBudget.create({
+          data: {
+            sessionId,
+            period: newPeriod.trim(),
+            budget: budget !== undefined ? BigInt(budget) : oldPeriodBudget.budget,
+          },
+        });
+
+        // Update all allocations with the new period name
+        const allocationsResult = await tx.allocation.updateMany({
+          where: {
+            sessionId,
+            period: actualOldPeriod as string | null,
+          },
+          data: {
+            period: newPeriod.trim(),
+          },
+        });
+
+        return { updated: allocationsResult.count };
+      } else {
+        // Period name not changing: just update budget
+        await tx.periodBudget.update({
+          where: {
+            sessionId_period: {
+              sessionId,
+              period: actualOldPeriod as string,
+            },
+          },
+          data: {
+            budget: budget !== undefined ? BigInt(budget) : oldPeriodBudget.budget,
+          },
+        });
+
+        return { updated: 0 };
+      }
     });
 
     return NextResponse.json({
