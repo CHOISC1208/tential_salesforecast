@@ -18,6 +18,14 @@ export async function PUT(
     const decodedOldPeriod = decodeURIComponent(oldPeriod);
     const actualOldPeriod = decodedOldPeriod === 'null' ? null : decodedOldPeriod;
 
+    // Prevent renaming of default period
+    if (actualOldPeriod === null) {
+      return NextResponse.json(
+        { error: 'Cannot rename default period' },
+        { status: 400 }
+      );
+    }
+
     // Validate new period name
     if (!newPeriod || typeof newPeriod !== 'string' || newPeriod.trim() === '') {
       return NextResponse.json(
@@ -115,8 +123,9 @@ export async function PUT(
     });
   } catch (error) {
     console.error('Error renaming period:', error);
+    console.error('Error details:', error instanceof Error ? error.message : String(error));
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
