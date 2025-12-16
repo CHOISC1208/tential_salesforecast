@@ -5,7 +5,7 @@ import { z } from 'zod';
 const periodSchema = z.object({
   period: z.string().min(1).max(100),
   budget: z.number().int().positive(),
-  copyFrom: z.string().optional()
+  copyFrom: z.string().nullable().optional()
 });
 
 /**
@@ -110,7 +110,7 @@ export async function POST(
     });
 
     // Handle allocation copying if copyFrom is provided
-    if (copyFrom !== undefined && copyFrom !== '') {
+    if (copyFrom !== undefined && copyFrom !== null && copyFrom !== '') {
       // Copy allocations from another period
       const sourceAllocations = await prisma.allocation.findMany({
         where: {
