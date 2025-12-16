@@ -18,14 +18,6 @@ export async function PUT(
     const decodedOldPeriod = decodeURIComponent(oldPeriod);
     const actualOldPeriod = decodedOldPeriod === 'null' ? null : decodedOldPeriod;
 
-    // Prevent renaming of default period
-    if (actualOldPeriod === null) {
-      return NextResponse.json(
-        { error: 'Cannot rename default period' },
-        { status: 400 }
-      );
-    }
-
     // Validate new period name
     if (!newPeriod || typeof newPeriod !== 'string' || newPeriod.trim() === '') {
       return NextResponse.json(
@@ -145,14 +137,6 @@ export async function DELETE(
     // Decode URL-encoded period
     const decodedPeriod = decodeURIComponent(period);
     const actualPeriod = decodedPeriod === 'null' ? null : decodedPeriod;
-
-    // Prevent deletion of default period
-    if (actualPeriod === null) {
-      return NextResponse.json(
-        { error: 'Cannot delete default period' },
-        { status: 400 }
-      );
-    }
 
     // Verify session exists
     const session = await prisma.session.findUnique({

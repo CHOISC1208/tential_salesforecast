@@ -1113,14 +1113,13 @@ export default function SpreadsheetPage() {
                         </button>
                         <button
                           onClick={() => {
-                            const editablePeriods = availablePeriods.filter(p => p !== null)
-                            if (editablePeriods.length === 0) {
-                              alert('変更できる期間がありません。デフォルト期間は変更できません。')
+                            if (availablePeriods.length === 0) {
+                              alert('変更する期間がありません')
                               return
                             }
                             setPeriodModalMode('rename')
-                            setPeriodModalValue(editablePeriods[0])
-                            setPeriodModalNewValue(editablePeriods[0] || '')
+                            setPeriodModalValue(availablePeriods[0])
+                            setPeriodModalNewValue(availablePeriods[0] || '')
                             setShowPeriodModal(true)
                           }}
                           className="p-1 text-blue-600 hover:bg-blue-50 rounded"
@@ -1130,13 +1129,12 @@ export default function SpreadsheetPage() {
                         </button>
                         <button
                           onClick={() => {
-                            const deletablePeriods = availablePeriods.filter(p => p !== null)
-                            if (deletablePeriods.length === 0) {
-                              alert('削除できる期間がありません。デフォルト期間は削除できません。')
+                            if (availablePeriods.length === 0) {
+                              alert('削除する期間がありません')
                               return
                             }
                             setPeriodModalMode('delete')
-                            setPeriodModalValue(deletablePeriods[0])
+                            setPeriodModalValue(availablePeriods[0])
                             setShowPeriodModal(true)
                           }}
                           className="p-1 text-red-600 hover:bg-red-50 rounded"
@@ -1487,9 +1485,9 @@ export default function SpreadsheetPage() {
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                   >
-                    {availablePeriods.filter(p => p !== null).map(period => (
-                      <option key={period} value={period}>
-                        {period}
+                    {availablePeriods.map(period => (
+                      <option key={period === null ? 'null' : period} value={period === null ? 'null' : period}>
+                        {period === null ? 'デフォルト期間' : period}
                       </option>
                     ))}
                   </select>
@@ -1516,15 +1514,15 @@ export default function SpreadsheetPage() {
                     onChange={(e) => setPeriodModalValue(e.target.value === 'null' ? null : e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                   >
-                    {availablePeriods.filter(p => p !== null).map(period => (
-                      <option key={period} value={period}>
-                        {period}
+                    {availablePeriods.map(period => (
+                      <option key={period === null ? 'null' : period} value={period === null ? 'null' : period}>
+                        {period === null ? 'デフォルト期間' : period}
                       </option>
                     ))}
                   </select>
                 </div>
                 <p className="text-gray-900 mb-4">
-                  期間「{periodModalValue}」を削除しますか？
+                  期間「{periodModalValue === null ? 'デフォルト期間' : periodModalValue}」を削除しますか？
                   この期間の全ての配分データが削除されます。この操作は元に戻せません。
                 </p>
               </>
