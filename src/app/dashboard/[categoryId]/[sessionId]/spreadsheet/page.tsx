@@ -1547,17 +1547,17 @@ export default function SpreadsheetPage() {
 
           {/* Table */}
           <div className="card overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{ tableLayout: 'fixed' }}>
               <thead className="bg-gray-50 sticky top-0 z-20">
                 {/* First header row: Period names with budgets */}
                 <tr>
-                  <th rowSpan={2} className="text-left py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-30 border-r border-gray-300">
+                  <th rowSpan={2} className="text-left py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-30 border-r border-gray-300" style={{ width: '400px', minWidth: '400px' }}>
                     階層名
                   </th>
-                  <th rowSpan={2} className="text-center py-3 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                  <th rowSpan={2} className="text-center py-3 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '80px', minWidth: '80px' }}>
                     レベル
                   </th>
-                  <th rowSpan={2} className="text-right py-3 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                  <th rowSpan={2} className="text-right py-3 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '120px', minWidth: '120px' }}>
                     単価
                   </th>
                   {/* Period headers with budgets in M-units */}
@@ -1577,10 +1577,10 @@ export default function SpreadsheetPage() {
                 <tr>
                   {availablePeriods.map(period => (
                     <Fragment key={`${period === null ? 'null' : period}-subheader`}>
-                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '120px', minWidth: '120px' }}>
                         %
                       </th>
-                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300">
+                      <th className="text-right py-2 px-4 font-semibold text-gray-900 border-r border-gray-300" style={{ width: '180px', minWidth: '180px' }}>
                         金額
                       </th>
                     </Fragment>
