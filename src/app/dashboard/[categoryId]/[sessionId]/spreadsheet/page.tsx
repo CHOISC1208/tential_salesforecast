@@ -707,16 +707,32 @@ export default function SpreadsheetPage() {
           let cumulativePercentage = 1.0 // 100%から開始
           let hasAllocation = false
 
+          // Debug: Log for first SKU only, all periods
+          const isFirstSku = skuData.indexOf(sku) === 0
+          if (isFirstSku) {
+            console.log(`\n=== Period: ${period} ===`)
+            console.log(`SKU: ${sku.skuCode}`)
+            console.log(`Path: ${skuPath}`)
+          }
+
           // 各階層レベルの割合を掛け算（SKUレベルは除く、階層レベルのみ）
           const hierarchyLevels = pathParts.length - 1 // 最後はSKUなので除く
           for (let level = 1; level <= hierarchyLevels; level++) {
             const levelPath = pathParts.slice(0, level).join('/')
             const levelAllocation = periodAllocations.find((a: Allocation & { period?: string | null }) => a.hierarchyPath === levelPath)
 
+            if (isFirstSku) {
+              console.log(`  Level ${level} (${levelPath}): ${levelAllocation ? levelAllocation.percentage + '%' : 'NOT FOUND'}`)
+            }
+
             if (levelAllocation && levelAllocation.percentage > 0) {
               cumulativePercentage *= (Number(levelAllocation.percentage) / 100)
               hasAllocation = true
             }
+          }
+
+          if (isFirstSku) {
+            console.log(`  Final: ${(cumulativePercentage * 100).toFixed(4)}%`)
           }
 
           // 階層に配分がある場合のみ出力
