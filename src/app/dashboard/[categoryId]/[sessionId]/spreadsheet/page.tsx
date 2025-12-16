@@ -77,6 +77,7 @@ export default function SpreadsheetPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [focusedPath, setFocusedPath] = useState<string | null>(null)
+  const [focusedInput, setFocusedInput] = useState<{ path: string; period: string | null } | null>(null)
   const [editingAmount, setEditingAmount] = useState<{ path: string; period: string | null } | null>(null)
   const [showDeleteSessionModal, setShowDeleteSessionModal] = useState(false)
   const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
@@ -570,19 +571,28 @@ export default function SpreadsheetPage() {
       return
     }
 
+    if (!periodModalBudget || parseInt(periodModalBudget) <= 0) {
+      alert('予算額を入力してください')
+      return
+    }
+
     try {
       const encodedPeriod = encodeURIComponent(periodModalValue === null ? 'null' : periodModalValue)
       const response = await fetch(`/api/sessions/${params.sessionId}/periods/${encodedPeriod}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPeriod: periodModalNewValue.trim() })
+        body: JSON.stringify({
+          newPeriod: periodModalNewValue.trim(),
+          budget: parseInt(periodModalBudget)
+        })
       })
 
       if (response.ok) {
-        alert('期間名を変更しました')
+        alert('期間名と予算を変更しました')
         setShowPeriodModal(false)
         setPeriodModalValue('')
         setPeriodModalNewValue('')
+        setPeriodModalBudget('')
         loadData()
       } else {
         const error = await response.json()
@@ -929,6 +939,10 @@ export default function SpreadsheetPage() {
     return nodes.flatMap((node, index) => {
       const colors = levelColorPalette[(node.level - 1) % levelColorPalette.length]
 
+      // Check if this row is a sibling of the focused input
+      const isRowSiblingOfFocused = focusedInput && areSiblings(node.path, focusedInput.path)
+      const isRowFocused = focusedInput && node.path === focusedInput.path
+
       // Handle row click to toggle group
       const handleRowClick = (e: React.MouseEvent) => {
         // Don't toggle if clicking on input, button, or interactive elements
@@ -944,11 +958,17 @@ export default function SpreadsheetPage() {
       return (
         <Fragment key={node.path}>
           <tr
-            className={`border-b border-gray-200 ${colors.bg} ${colors.hover} transition-colors duration-150 ${node.children.length > 0 ? 'cursor-pointer' : ''}`}
+            className={`border-b border-gray-200 ${
+              isRowFocused ? 'ring-2 ring-blue-400 bg-blue-50' :
+              isRowSiblingOfFocused ? 'bg-blue-50/50' : colors.bg
+            } ${colors.hover} transition-colors duration-150 ${node.children.length > 0 ? 'cursor-pointer' : ''}`}
             onClick={handleRowClick}
           >
             {/* 階層名 */}
-            <td className={`py-2 px-4 sticky left-0 ${colors.bg} z-10`} style={{ paddingLeft: `${depth * 24 + 16}px` }}>
+            <td className={`py-2 px-4 sticky left-0 ${
+              isRowFocused ? 'bg-blue-50' :
+              isRowSiblingOfFocused ? 'bg-blue-50/50' : colors.bg
+            } z-10`} style={{ paddingLeft: `${depth * 24 + 16}px` }}>
               <div className="flex items-center gap-2">
                 {node.children.length > 0 && (
                   <button
@@ -994,6 +1014,11 @@ export default function SpreadsheetPage() {
               const remainingAmount = parentAmount - siblingsTotalAmount
               const isAmountOverLimit = siblingsTotalAmount > parentAmount
 
+              // Check if this input is focused
+              const isInputFocused = focusedInput?.path === node.path && focusedInput?.period === period
+              // Check if this node is a sibling of the focused input
+              const isSiblingOfFocused = focusedInput && focusedInput.period === period && areSiblings(node.path, focusedInput.path)
+
               return (
                 <Fragment key={`${period === null ? 'null' : period}`}>
                   {/* 割合カラム */}
@@ -1003,7 +1028,10 @@ export default function SpreadsheetPage() {
                         type="number"
                         value={percentage || ''}
                         onChange={(e) => updateAllocation(node.path, period, parseFloat(e.target.value) || 0)}
+                        onFocus={() => setFocusedInput({ path: node.path, period })}
+                        onBlur={() => setFocusedInput(null)}
                         className={`w-20 px-2 py-1 border rounded text-right text-gray-900 ${
+                          isInputFocused ? 'border-blue-600 border-2 ring-2 ring-blue-200' :
                           isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-300'
                         }`}
                         min="0"
@@ -1012,9 +1040,13 @@ export default function SpreadsheetPage() {
                       />
                       <div className="text-xs">
                         {isOverLimit ? (
-                          <span className="text-red-600 font-medium">超過: {Math.abs(remaining).toFixed(1)}%</span>
+                          <span className={`text-red-600 ${isSiblingOfFocused ? 'font-bold text-base' : 'font-medium'}`}>
+                            超過: {Math.abs(remaining).toFixed(1)}%
+                          </span>
                         ) : (
-                          <span className="text-gray-500">残り: {remaining.toFixed(1)}%</span>
+                          <span className={`${isSiblingOfFocused ? 'text-blue-700 font-bold text-base' : 'text-gray-500'}`}>
+                            残り: {remaining.toFixed(1)}%
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1537,6 +1569,11 @@ export default function SpreadsheetPage() {
                       const val = e.target.value === 'null' ? null : e.target.value
                       setPeriodModalValue(val)
                       setPeriodModalNewValue(val === null ? '' : val)
+                      // Load current budget for selected period
+                      const periodBudget = session?.periodBudgets.find(pb => pb.period === val)
+                      if (periodBudget) {
+                        setPeriodModalBudget(periodBudget.budget)
+                      }
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900"
                   >
@@ -1555,6 +1592,16 @@ export default function SpreadsheetPage() {
                     onChange={(e) => setPeriodModalNewValue(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="新しい期間名"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">予算額</label>
+                  <input
+                    type="number"
+                    value={periodModalBudget}
+                    onChange={(e) => setPeriodModalBudget(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="100000000"
                   />
                 </div>
               </>

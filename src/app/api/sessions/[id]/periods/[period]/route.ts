@@ -12,7 +12,7 @@ export async function PUT(
   try {
     const { id: sessionId, period: oldPeriod } = await params;
     const body = await request.json();
-    const { newPeriod } = body;
+    const { newPeriod, budget } = body;
 
     // Decode URL-encoded period
     const decodedOldPeriod = decodeURIComponent(oldPeriod);
@@ -22,6 +22,14 @@ export async function PUT(
     if (!newPeriod || typeof newPeriod !== 'string' || newPeriod.trim() === '') {
       return NextResponse.json(
         { error: 'New period name is required' },
+        { status: 400 }
+      );
+    }
+
+    // Validate budget if provided
+    if (budget !== undefined && (typeof budget !== 'number' || budget <= 0)) {
+      return NextResponse.json(
+        { error: 'Budget must be a positive number' },
         { status: 400 }
       );
     }
@@ -84,12 +92,12 @@ export async function PUT(
         },
       });
 
-      // Create new period budget with same budget value
+      // Create new period budget with updated or same budget value
       await tx.periodBudget.create({
         data: {
           sessionId,
           period: newPeriod.trim(),
-          budget: oldPeriodBudget.budget,
+          budget: budget !== undefined ? BigInt(budget) : oldPeriodBudget.budget,
         },
       });
 
